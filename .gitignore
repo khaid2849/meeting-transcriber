@@ -1,0 +1,9 @@
+.venv/
+models/
+meetings/
+*.wav
+__pycache__/
+.pytest_cache/
+tmp/
+.superpowers/
+.DS_Store
