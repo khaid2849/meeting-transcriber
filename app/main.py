@@ -13,6 +13,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 from app import config
+from app.ai.chats import ChatStore
+from app.ai.routes import ai_router
+from app.ai.settings import AISettings
 from app.assemble import group_paragraphs
 from app.storage import Meeting, MeetingStore
 from app.worker import ACTIVE, RealEngine, Worker, update_meeting
@@ -42,11 +45,14 @@ def allowed_hosts(env=os.environ) -> tuple[str, ...]:
     return LOCAL_HOSTS + tuple(h for h in extra if h)
 
 
-def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_HOSTS) -> FastAPI:
+def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_HOSTS,
+               ai_settings: AISettings | None = None, chats: ChatStore | None = None) -> FastAPI:
     app = FastAPI(title="Meeting Transcriber", lifespan=lifespan)
     # Blocks DNS-rebinding pages from reading transcripts through the browser.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    if ai_settings is not None and chats is not None:
+        app.include_router(ai_router(store, ai_settings, chats))
 
     def get_or_404(meeting_id: str) -> Meeting:
         try:
@@ -150,4 +156,6 @@ def build_app() -> FastAPI:
         worker.start()
         yield
 
-    return create_app(store, worker, lifespan=lifespan, allowed_hosts=allowed_hosts())
+    return create_app(store, worker, lifespan=lifespan, allowed_hosts=allowed_hosts(),
+                      ai_settings=AISettings(config.DATA_DIR / "ai_settings.json"),
+                      chats=ChatStore(config.DATA_DIR / "chats"))

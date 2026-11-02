@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MEETINGS_DIR = ROOT / "meetings"
 MODELS_DIR = ROOT / "models"
+DATA_DIR = ROOT / "data"  # AI settings (with API keys) and saved chats
 PORT = 8765
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"

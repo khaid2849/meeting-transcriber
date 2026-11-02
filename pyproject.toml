@@ -10,6 +10,9 @@ dependencies = [
     "mlx-whisper",
     "sherpa-onnx",
     "numpy",
+    "anthropic>=2.3.0",
+    "openai>=3.42.1",
+    "google-genai>=2.34.0",
 ]
 
 [dependency-groups]
