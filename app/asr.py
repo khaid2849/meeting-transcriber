@@ -73,3 +73,16 @@ def transcribe(samples: np.ndarray, model: str, keywords: str,
     if not chunks:
         on_progress(1.0)
     return segments
+
+
+def release_model() -> None:
+    """Drop the cached Whisper model so an idle server holds ~50 MB instead of ~4 GB."""
+    import gc
+
+    import mlx.core as mx
+    from mlx_whisper.transcribe import ModelHolder
+
+    ModelHolder.model = None
+    ModelHolder.model_path = None
+    gc.collect()
+    mx.clear_cache()

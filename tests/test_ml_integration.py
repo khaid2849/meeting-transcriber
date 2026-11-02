@@ -30,3 +30,12 @@ def test_transcribe_excerpt(samples):
     assert all(s["text"].strip() for s in segs)
     assert progress and progress[-1] == pytest.approx(1.0)
 
+
+
+def test_release_model_frees_gpu_memory(samples):
+    import mlx.core as mx
+    from app.asr import release_model, transcribe
+    transcribe(samples[:16000 * 10], config.WHISPER_MODEL, "", lambda p: None)
+    assert mx.get_active_memory() > 1e9
+    release_model()
+    assert mx.get_active_memory() < 3e8

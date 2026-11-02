@@ -22,6 +22,7 @@ class Engine(Protocol):
     def extract_audio(self, src: Path, dst: Path) -> None: ...
     def load_samples(self, path: Path) -> np.ndarray: ...
     def transcribe(self, samples, model: str, keywords: str, on_progress) -> list[dict]: ...
+    def release(self) -> None: ...
 
 
 class RealEngine:
@@ -40,6 +41,10 @@ class RealEngine:
     def transcribe(self, samples, model, keywords, on_progress):
         from app.asr import transcribe
         return transcribe(samples, model, keywords, on_progress)
+
+    def release(self):
+        from app.asr import release_model
+        release_model()
 
 
 def rebuild_transcript(store: MeetingStore, meeting_id: str) -> None:
@@ -87,6 +92,11 @@ class Worker:
                 self.run_job(meeting_id)
             except Exception:  # noqa: BLE001 — never let one job kill the worker thread
                 log.exception("worker crashed on %s", meeting_id)
+            if self.queue.empty():
+                try:
+                    self.engine.release()
+                except Exception:  # noqa: BLE001
+                    log.exception("could not release the model")
 
     def run_job(self, meeting_id: str) -> None:
         try:

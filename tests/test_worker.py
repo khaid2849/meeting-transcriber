@@ -38,6 +38,9 @@ class FakeEngine:
         on_progress(1.0)
         return [dict(s) for s in self.segments]
 
+    def release(self):
+        self.calls.append("release")
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -206,3 +209,41 @@ def test_concurrent_title_edits_leave_transcript_consistent(store):
         t.join()
     assert errors == []
     assert transcript(store, m).startswith(f"# {store.get(m.id).title}\n")
+
+
+def run_in_thread(store, engine, n_jobs, fail_first=False):
+    """Start the worker on queued meetings and wait until n_jobs have run."""
+    w = Worker(store, engine, "m")
+    real_run, seen, finished = w.run_job, [], threading.Event()
+
+    def counted(meeting_id):
+        try:
+            if fail_first and not seen:
+                raise OSError("boom")
+            real_run(meeting_id)
+        finally:
+            seen.append(meeting_id)
+            if len(seen) == n_jobs:
+                finished.set()
+
+    w.run_job = counted
+    w.start()
+    assert finished.wait(5)
+    for _ in range(50):  # release runs right after the last job returns
+        if engine.calls and engine.calls[-1] == "release":
+            break
+        threading.Event().wait(0.02)
+    return engine.calls
+
+
+def test_releases_model_once_when_queue_drains(store):
+    new_meeting(store, title="A"), new_meeting(store, title="B")
+    calls = run_in_thread(store, FakeEngine(), 2)
+    assert calls.count("release") == 1 and calls[-1] == "release"
+    assert calls.count("transcribe") == 2
+
+
+def test_releases_model_after_failed_job(store):
+    new_meeting(store)
+    calls = run_in_thread(store, FakeEngine(), 1, fail_first=True)
+    assert calls == ["release"]
