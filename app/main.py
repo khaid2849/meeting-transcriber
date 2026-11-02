@@ -1,5 +1,6 @@
 """FastAPI app: JSON API + static pages. Run with `uvicorn --factory app.main:build_app`."""
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from datetime import date as Date
@@ -33,6 +34,12 @@ def _check_date(value: str) -> str:
 
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
+
+
+def allowed_hosts(env=os.environ) -> tuple[str, ...]:
+    """Local hosts plus MT_ALLOWED_HOSTS (comma-separated), e.g. the Tailscale name behind `tailscale serve`."""
+    extra = [h.strip().rstrip(".") for h in env.get("MT_ALLOWED_HOSTS", "").split(",")]
+    return LOCAL_HOSTS + tuple(h for h in extra if h)
 
 
 def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_HOSTS) -> FastAPI:
@@ -143,4 +150,4 @@ def build_app() -> FastAPI:
         worker.start()
         yield
 
-    return create_app(store, worker, lifespan=lifespan)
+    return create_app(store, worker, lifespan=lifespan, allowed_hosts=allowed_hosts())

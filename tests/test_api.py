@@ -142,3 +142,17 @@ def test_meeting_url_serves_the_same_app_shell(client, done_meeting):
 
 def test_meeting_url_unknown_id_404(client):
     assert client.get("/m/2026-01-01-khong-co").status_code == 404
+
+
+def test_allowed_hosts_adds_env_hosts():
+    from app.main import allowed_hosts
+    assert allowed_hosts({}) == ("localhost", "127.0.0.1")
+    env = {"MT_ALLOWED_HOSTS": " khaid-1.tail18735e.ts.net. , ,other.ts.net"}
+    assert allowed_hosts(env) == ("localhost", "127.0.0.1", "khaid-1.tail18735e.ts.net", "other.ts.net")
+
+
+def test_tailnet_host_accepted_when_allowed(store, worker):
+    app = create_app(store, worker, allowed_hosts=("testserver", "khaid-1.tail18735e.ts.net"))
+    c = TestClient(app)
+    assert c.get("/api/meetings", headers={"Host": "khaid-1.tail18735e.ts.net"}).status_code == 200
+    assert c.get("/api/meetings", headers={"Host": "evil.ts.net"}).status_code == 400

@@ -12,7 +12,19 @@ DOMAIN="gui/$(id -u)"
 [ -f models/silero_vad.onnx ] || { echo "Chưa có model: chạy ./setup_models.sh trước."; exit 1; }
 FFMPEG=$(command -v ffmpeg) || { echo "Thiếu ffmpeg: brew install ffmpeg"; exit 1; }
 
+# The Tailscale name lets `tailscale serve` (see ./enable-tailscale.sh) reach the app.
+TS_HOST=""
+if command -v tailscale >/dev/null; then
+  TS_HOST=$(tailscale status --json 2>/dev/null \
+    | python3 -c 'import sys, json; print(json.load(sys.stdin).get("Self", {}).get("DNSName", "").rstrip("."))' \
+    2>/dev/null || true)
+fi
+
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+for _ in $(seq 1 10); do  # bootout returns before the old process has released the port
+  lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 || break
+  sleep 1
+done
 if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Cổng $PORT đang bị chiếm (có thể ./run.sh đang chạy). Tắt nó rồi chạy lại script này."; exit 1
 fi
@@ -39,6 +51,7 @@ cat > "$PLIST" <<EOF
     <key>PATH</key><string>$(dirname "$FFMPEG"):/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HF_HUB_OFFLINE</key><string>1</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
+    <key>MT_ALLOWED_HOSTS</key><string>$TS_HOST</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

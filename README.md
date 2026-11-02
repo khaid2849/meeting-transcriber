@@ -39,6 +39,17 @@ Sau khi cài, chỉ cần mở http://localhost:8765 (hoặc `./run.sh`, script 
 
 Tài nguyên (đo trên M5, 16 GB): lúc rảnh ~0% CPU, ~50–200 MB RAM. Lúc xử lý, GPU chạy gần hết công suất và dùng khoảng 4–5 GB RAM; xử lý xong app nhả model ra khỏi bộ nhớ.
 
+## Truy cập từ thiết bị khác qua Tailscale
+
+```bash
+./enable-tailscale.sh    # mở app tại https://<tên-máy>.<tailnet>.ts.net, chỉ thiết bị trong tailnet vào được
+./disable-tailscale.sh   # tắt chia sẻ; app vẫn chạy trên máy
+```
+
+Dùng `tailscale serve` (HTTPS, chỉ trong tailnet), không dùng Funnel nên app không lộ ra Internet. App vẫn chỉ nghe trên `127.0.0.1`. App không có đăng nhập: ai trong tailnet của bạn cũng mở được.
+
+Máy Mac phải đang thức thì mới truy cập được. Nếu máy ngủ (gập máy khi chạy pin, hết thời gian chờ) thì app không vào được cho tới khi máy thức lại.
+
 ## File nằm ở đâu
 
 ```
