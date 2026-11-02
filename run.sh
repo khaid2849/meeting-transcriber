@@ -12,4 +12,5 @@ fi
 
 URL=http://localhost:8765
 (sleep 3; open "$URL") &
+export HF_HUB_OFFLINE=1  # models are local after setup; no network at runtime
 exec uv run uvicorn --factory app.main:build_app --host 127.0.0.1 --port 8765

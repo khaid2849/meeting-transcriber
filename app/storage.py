@@ -1,8 +1,10 @@
 """On-disk meeting store: one folder per meeting, metadata in meeting.json."""
 import json
+import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import unicodedata
 from dataclasses import asdict, dataclass, field, fields
@@ -10,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+log = logging.getLogger(__name__)
 ID_RE = re.compile(r"^[a-z0-9-]+$")
 MAX_SLUG = 60
 
@@ -48,17 +51,22 @@ def slugify(title: str, date: str) -> str:
     return f"{date}-{text or 'cuoc-hop'}"
 
 
-def _write_atomic(path: Path, data: Any) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def write_text_atomic(path: Path, text: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
     os.replace(tmp, path)
+
+
+def _write_atomic(path: Path, data: Any) -> None:
+    write_text_atomic(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 class MeetingStore:
     def __init__(self, root: Path):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
+        self.lock = threading.RLock()  # guards meeting.json + transcript.md rewrites
 
     def dir(self, meeting_id: str) -> Path:
         if not ID_RE.match(meeting_id or ""):
@@ -91,7 +99,7 @@ class MeetingStore:
 
     def update(self, meeting_id: str, **changes: Any) -> Meeting:
         """Re-read, apply changes and save under a lock, so the worker and API never clobber each other."""
-        with self._lock:
+        with self.lock:
             meeting = self.get(meeting_id)
             for key, value in changes.items():
                 if not hasattr(meeting, key):
@@ -101,8 +109,14 @@ class MeetingStore:
             return meeting
 
     def list(self) -> list[Meeting]:
-        meetings = [self.get(p.name) for p in self.root.iterdir()
-                    if p.is_dir() and ID_RE.match(p.name) and (p / "meeting.json").exists()]
+        meetings = []
+        for p in self.root.iterdir():
+            if not (p.is_dir() and ID_RE.match(p.name) and (p / "meeting.json").exists()):
+                continue
+            try:
+                meetings.append(self.get(p.name))
+            except (KeyError, ValueError, TypeError):
+                log.exception("skipping unreadable meeting %s", p.name)
         return sorted(meetings, key=lambda m: (m.date, m.created_at), reverse=True)
 
     def delete(self, meeting_id: str) -> None:

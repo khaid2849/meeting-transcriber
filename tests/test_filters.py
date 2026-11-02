@@ -81,3 +81,53 @@ def test_clean_keeps_short_fast_interjection():
 
 def test_clean_drops_thanks_for_watching_outro():
     assert clean_segments([s("Cảm ơn các bạn đã theo dõi và hẹn gặp lại.")]) == []
+
+
+@pytest.mark.parametrize("text", ["Mình cần subscribe follower vào record đó",
+                                  "Kafka consumer subscribe vào topic này"])
+def test_clean_keeps_technical_subscribe(text):
+    assert len(clean_segments([s(text)])) == 1
+
+
+def test_clean_keeps_fast_real_speech():
+    seg = s("dạ vâng em hiểu rồi ạ")
+    seg["start"], seg["end"] = 10.0, 10.55
+    assert len(clean_segments([seg])) == 1
+
+
+def test_clean_reports_drops():
+    dropped = []
+    clean_segments([s("Hãy subscribe cho kênh Ghiền Mì Gõ"), s("Chúng ta bàn về GPU")],
+                   on_drop=lambda seg, reason: dropped.append(reason))
+    assert dropped == ["outro"]
+
+
+def timed(start, end, text):
+    return {"start": start, "end": end, "text": " " + text, "words": []}
+
+
+def test_needs_retry_when_a_hallucination_was_dropped():
+    from app.filters import needs_retry
+    segs = [timed(0, 3, "Nếu bạn muốn tham gia thông tin, hãy đăng ký kênh để nhận thông tin nhất.")]
+    assert needs_retry(segs, speech_seconds=3.0)
+
+
+def test_needs_retry_when_text_is_too_sparse_for_the_speech():
+    from app.filters import needs_retry
+    assert needs_retry([timed(0, 2, "vâng ạ")], speech_seconds=16.0)
+
+
+def test_no_retry_for_normal_output():
+    from app.filters import needs_retry
+    segs = [timed(0, 4, "những cái này thì đó cũng là một cái rất là quan trọng"),
+            timed(4, 8, "thì thường anh em mình sẽ đi thuê ngoài để dựng")]
+    assert not needs_retry(segs, speech_seconds=8.0)
+    assert not needs_retry([], speech_seconds=0.3)
+
+
+def test_pick_richer_prefers_more_clean_text():
+    from app.filters import pick_richer
+    halluc = [timed(0, 3, "Cảm ơn các bạn đã theo dõi và hẹn gặp lại.")]
+    real = [timed(0, 3, "ngoài cái em mình còn những cái thằng khác nữa")]
+    assert pick_richer(halluc, real) is real
+    assert pick_richer(real, halluc) is real

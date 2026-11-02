@@ -74,7 +74,7 @@ def format_ts(seconds: float) -> str:
 
 def render_markdown(meeting: Meeting, utterances: list[dict]) -> str:
     paragraphs = group_paragraphs(utterances, PARAGRAPH_MAX_GAP, PARAGRAPH_MAX_LEN)
-    speakers = list(dict.fromkeys(p["speaker"] for p in paragraphs if p["speaker"]))
+    speakers = sorted({p["speaker"] for p in paragraphs if p["speaker"]}, key=lambda s: int(s[1:]))
     info = [f"Ngày: {meeting.date}"]
     if meeting.duration:
         info.append(f"Thời lượng: {format_ts(meeting.duration)}")
@@ -86,3 +86,25 @@ def render_markdown(meeting: Meeting, utterances: list[dict]) -> str:
         head = f"**[{format_ts(p['start'])}] {label}:**" if label else f"**[{format_ts(p['start'])}]**"
         lines += [f"{head} {p['text']}", ""]
     return "\n".join(lines)
+
+
+def normalize_turns(turns: list[Turn], min_seconds: float) -> list[Turn]:
+    """Fold speakers with < min_seconds of talk into the nearest major speaker; renumber by first appearance."""
+    total: dict[int, float] = {}
+    for start, end, spk in turns:
+        total[spk] = total.get(spk, 0.0) + end - start
+    major = {spk for spk, sec in total.items() if sec >= min_seconds}
+    anchors = [t for t in turns if t[2] in major]
+
+    def nearest(turn: Turn) -> int:
+        def key(t: Turn):
+            gap = max(0.0, t[0] - turn[1], turn[0] - t[1])
+            return gap, t[0] > turn[0]  # ties go to the earlier speaker
+        return min(anchors, key=key)[2]
+
+    if anchors:
+        turns = [t if t[2] in major else (t[0], t[1], nearest(t)) for t in turns]
+    order: dict[int, int] = {}
+    for _, _, spk in turns:
+        order.setdefault(spk, len(order))
+    return [(start, end, order[spk]) for start, end, spk in turns]

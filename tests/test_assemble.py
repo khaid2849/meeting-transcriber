@@ -92,3 +92,33 @@ def test_render_without_speakers():
     md = render_markdown(meeting(duration=None), [utt(5, 8, None, "Xin chào")])
     assert md.splitlines()[1] == "Ngày: 2026-11-02"
     assert "**[00:00:05]** Xin chào" in md
+
+
+def test_normalize_turns_renumbers_by_first_appearance():
+    from app.assemble import normalize_turns
+    turns = [(0, 30, 7), (30, 60, 2), (60, 90, 7)]
+    assert normalize_turns(turns, min_seconds=5) == [(0, 30, 0), (30, 60, 1), (60, 90, 0)]
+
+
+def test_normalize_turns_absorbs_minor_speakers_into_nearest_major():
+    from app.assemble import normalize_turns
+    turns = [(0, 40, 3), (40, 41, 9), (41, 80, 5), (100, 101, 8), (120, 160, 5)]
+    out = normalize_turns(turns, min_seconds=5)
+    assert [spk for _, _, spk in out] == [0, 0, 1, 1, 1]
+
+
+def test_normalize_turns_keeps_everything_when_all_speakers_are_minor():
+    from app.assemble import normalize_turns
+    turns = [(0, 1, 4), (2, 3, 6)]
+    assert normalize_turns(turns, min_seconds=5) == [(0, 1, 0), (2, 3, 1)]
+
+
+def test_normalize_turns_empty():
+    from app.assemble import normalize_turns
+    assert normalize_turns([], min_seconds=5) == []
+
+
+def test_render_header_lists_speakers_in_numeric_order():
+    utts = [utt(0, 2, "S10", "a"), utt(3, 5, "S9", "b"), utt(6, 8, "S1", "c")]
+    md = render_markdown(meeting(), utts)
+    assert "Người nói: Người 1, Người 9, Người 10" in md.splitlines()[1]

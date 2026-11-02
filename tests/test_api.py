@@ -29,7 +29,7 @@ def worker(store):
 
 @pytest.fixture
 def client(store, worker):
-    return TestClient(create_app(store, worker))
+    return TestClient(create_app(store, worker, allowed_hosts=("testserver", "localhost", "127.0.0.1")))
 
 
 def upload(client, **form):
@@ -146,3 +146,12 @@ def test_audio_supports_range(client, done_meeting):
 def test_pages_served(client, done_meeting):
     assert client.get("/").status_code == 200
     assert client.get(f"/m/{done_meeting}").status_code == 200
+
+
+def test_rejects_foreign_host_header(client):
+    r = client.get("/api/meetings", headers={"Host": "evil.example"})
+    assert r.status_code == 400
+
+
+def test_allows_localhost_host_header(client):
+    assert client.get("/api/meetings", headers={"Host": "localhost:8765"}).status_code == 200

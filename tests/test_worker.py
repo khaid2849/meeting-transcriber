@@ -183,3 +183,69 @@ def test_enqueue_resets_error_state(store):
     w.enqueue(m.id)
     got = store.get(m.id)
     assert (got.status, got.error) == ("queued", None)
+
+
+class HallucinatingEngine(FakeEngine):
+    def transcribe(self, samples, model, keywords, on_progress):
+        on_progress(1.0)
+        outro = {"start": 11.0, "end": 11.1, "text": " Cảm ơn các bạn đã theo dõi và hẹn gặp lại.", "words": []}
+        return [dict(s) for s in SEGMENTS] + [outro]
+
+
+def test_whisper_json_keeps_raw_output_and_transcript_is_cleaned(store):
+    m = new_meeting(store)
+    Worker(store, HallucinatingEngine(), "m").run_job(m.id, "full")
+    assert len(store.read_json(m.id, "whisper.json")["segments"]) == 3
+    md = (store.dir(m.id) / "transcript.md").read_text(encoding="utf-8")
+    assert "theo dõi" not in md and "Bên mình dùng GPU" in md
+
+
+def test_worker_loop_survives_unexpected_error(store):
+    import threading
+    a, b = new_meeting(store, title="A"), new_meeting(store, title="B")
+    w = Worker(store, FakeEngine(), "m")
+    real_run, done = w.run_job, threading.Event()
+
+    def flaky(meeting_id, mode):
+        if meeting_id == a.id:
+            raise OSError("disk full")
+        real_run(meeting_id, mode)
+        done.set()
+
+    w.run_job = flaky
+    w.start()  # recover() queues both
+    assert done.wait(5)
+    assert store.get(b.id).status == "done"
+
+
+def test_recover_skips_corrupt_meeting_json(store):
+    good = new_meeting(store)
+    bad = new_meeting(store, title="Hỏng")
+    (store.dir(bad.id) / "meeting.json").write_text("{không phải json", encoding="utf-8")
+    w = Worker(store, FakeEngine(), "m")
+    w.recover()
+    assert [mid for mid, _ in w.queue.queue] == [good.id]
+
+
+def test_concurrent_renames_leave_transcript_consistent(store):
+    import threading
+    m = new_meeting(store)
+    Worker(store, FakeEngine(), "m").run_job(m.id, "full")
+    errors = []
+    from app.worker import update_meeting
+
+    def worker(i):
+        try:
+            for j in range(15):
+                update_meeting(store, m.id, speakers={"S1": f"Tên {i}-{j}"})
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    final = store.get(m.id).speakers["S1"]
+    assert f"**[00:00:05] {final}:**" in (store.dir(m.id) / "transcript.md").read_text(encoding="utf-8")

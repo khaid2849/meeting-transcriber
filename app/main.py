@@ -8,12 +8,13 @@ from pathlib import Path
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 from app import config
 from app.assemble import group_paragraphs, speaker_label
 from app.storage import Meeting, MeetingStore
-from app.worker import ACTIVE, RealEngine, Worker, rebuild_transcript
+from app.worker import ACTIVE, RealEngine, Worker, update_meeting
 
 STATIC = Path(__file__).parent / "static"
 MAX_SPEAKERS = 20
@@ -44,8 +45,13 @@ def _check_speakers(value) -> int | None:
     return n
 
 
-def create_app(store: MeetingStore, worker, lifespan=None) -> FastAPI:
+LOCAL_HOSTS = ("localhost", "127.0.0.1")
+
+
+def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_HOSTS) -> FastAPI:
     app = FastAPI(title="Meeting Transcriber", lifespan=lifespan)
+    # Blocks DNS-rebinding pages from reading transcripts through the browser.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     def get_or_404(meeting_id: str) -> Meeting:
@@ -112,10 +118,7 @@ def create_app(store: MeetingStore, worker, lifespan=None) -> FastAPI:
             changes["date"] = _check_date(patch.date)
         if patch.speakers is not None:
             changes["speakers"] = {k: v.strip() for k, v in patch.speakers.items() if v.strip()}
-        meeting = store.update(meeting_id, **changes)
-        if meeting.status == "done":
-            rebuild_transcript(store, meeting_id)
-        return meeting.to_dict()
+        return update_meeting(store, meeting_id, **changes).to_dict()
 
     @app.post("/api/meetings/{meeting_id}/retry")
     def retry(meeting_id: str) -> dict:

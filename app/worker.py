@@ -9,7 +9,8 @@ from typing import Protocol
 import numpy as np
 
 from app.assemble import assign_speakers, render_markdown
-from app.storage import MeetingStore
+from app.filters import clean_segments
+from app.storage import Meeting, MeetingStore, write_text_atomic
 
 log = logging.getLogger(__name__)
 ACTIVE = ("converting", "transcribing", "diarizing")
@@ -46,12 +47,19 @@ class RealEngine:
 
 
 def rebuild_transcript(store: MeetingStore, meeting_id: str) -> None:
-    meeting = store.get(meeting_id)
-    utterances = store.read_json(meeting_id, "segments.json")
-    path = store.dir(meeting_id) / "transcript.md"
-    tmp = path.with_suffix(".md.tmp")
-    tmp.write_text(render_markdown(meeting, utterances), encoding="utf-8")
-    tmp.replace(path)
+    with store.lock:
+        meeting = store.get(meeting_id)
+        utterances = store.read_json(meeting_id, "segments.json")
+        write_text_atomic(store.dir(meeting_id) / "transcript.md", render_markdown(meeting, utterances))
+
+
+def update_meeting(store: MeetingStore, meeting_id: str, **changes) -> Meeting:
+    """Apply user edits and re-render transcript.md atomically with respect to other edits."""
+    with store.lock:
+        meeting = store.update(meeting_id, **changes)
+        if meeting.status == "done":
+            rebuild_transcript(store, meeting_id)
+        return meeting
 
 
 class Worker:
@@ -65,7 +73,7 @@ class Worker:
         threading.Thread(target=self._loop, name="transcriber", daemon=True).start()
 
     def recover(self) -> None:
-        for m in reversed(self.store.list()):  # oldest first
+        for m in reversed(self.store.list()):  # oldest first; unreadable meetings are skipped
             if m.status in ACTIVE:
                 self.store.update(m.id, status="error",
                                   error="Server bị tắt giữa chừng. Bấm \"Chạy lại\" để xử lý lại.")
@@ -79,7 +87,10 @@ class Worker:
     def _loop(self) -> None:
         while True:
             meeting_id, mode = self.queue.get()
-            self.run_job(meeting_id, mode)
+            try:
+                self.run_job(meeting_id, mode)
+            except Exception:  # noqa: BLE001 — never let one job kill the worker thread
+                log.exception("worker crashed on %s", meeting_id)
 
     def run_job(self, meeting_id: str, mode: str) -> None:
         try:
@@ -140,6 +151,10 @@ class Worker:
         self._finish(meeting_id, samples, segments)
 
     def _finish(self, meeting_id: str, samples: np.ndarray, segments: list[dict]) -> None:
+        def log_drop(seg: dict, reason: str) -> None:
+            log.info("%s: dropped %s segment at %.1fs: %r", meeting_id, reason, seg["start"], seg["text"])
+
+        segments = clean_segments(segments, on_drop=log_drop)
         meeting = self.store.get(meeting_id)
         turns, warning = None, None
         if meeting.diarize:

@@ -177,10 +177,20 @@ function initMeeting() {
   $("date").onchange = () => save({ date: $("date").value }).then((ok) => { if (!ok) $("date").value = meeting.date; });
 
   $("copy").onclick = async () => {
-    const text = await (await fetch(`/api/meetings/${id}/transcript.md`)).text();
-    await navigator.clipboard.writeText(text);
-    $("copy").textContent = "Đã copy ✓";
-    setTimeout(() => { $("copy").textContent = "Copy bản ghi"; }, 1500);
+    // Safari only allows clipboard writes started synchronously in the click, so hand it a promise.
+    const blob = fetch(`/api/meetings/${id}/transcript.md`).then((r) => r.blob())
+      .then((b) => new Blob([b], { type: "text/plain" }));
+    try {
+      if (window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+      } else {
+        await navigator.clipboard.writeText(await (await blob).text());
+      }
+      $("copy").textContent = "Đã copy ✓";
+      setTimeout(() => { $("copy").textContent = "Copy bản ghi"; }, 1500);
+    } catch (err) {
+      alert(`Không copy được (${err.message}). Dùng nút "Tải .md" thay thế.`);
+    }
   };
   $("download").onclick = () => { location.href = `/api/meetings/${id}/transcript.md`; };
 

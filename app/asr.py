@@ -4,8 +4,8 @@ from collections.abc import Callable
 import numpy as np
 import sherpa_onnx
 
-from app.config import CHUNK_MAX_LEN, LANGUAGE, VAD_MODEL
-from app.filters import clean_segments, speech_chunks
+from app.config import CHUNK_MAX_GAP, CHUNK_MAX_LEN, LANGUAGE, VAD_MODEL
+from app.filters import needs_retry, pick_richer, speech_chunks
 
 SR = 16000
 
@@ -37,18 +37,29 @@ def detect_speech(samples: np.ndarray) -> list[tuple[float, float]]:
 
 def transcribe(samples: np.ndarray, model: str, keywords: str,
                on_progress: Callable[[float], None]) -> list[dict]:
-    """Return cleaned Whisper segments (with word timings) in absolute seconds."""
+    """Return raw Whisper segments in absolute seconds (cleaning happens later, see worker)."""
     import mlx_whisper
 
-    chunks = speech_chunks(detect_speech(samples), CHUNK_MAX_LEN, total=len(samples) / SR)
+    regions = detect_speech(samples)
+    chunks = speech_chunks(regions, CHUNK_MAX_LEN, total=len(samples) / SR, max_gap=CHUNK_MAX_GAP)
+    prompt = keywords.strip() or None
+
+    def run(piece: np.ndarray, initial_prompt: str | None) -> list[dict]:
+        return mlx_whisper.transcribe(
+            piece, path_or_hf_repo=model, language=LANGUAGE, initial_prompt=initial_prompt,
+            condition_on_previous_text=False,
+            # Word timings cost ~3x per call on short chunks; speakers are assigned per segment.
+            word_timestamps=False, verbose=None)["segments"]
+
     segments: list[dict] = []
     for i, (start, end) in enumerate(chunks):
         piece = samples[int(start * SR):int(end * SR)]
-        result = mlx_whisper.transcribe(
-            piece, path_or_hf_repo=model, language=LANGUAGE,
-            initial_prompt=keywords.strip() or None, condition_on_previous_text=False,
-            word_timestamps=True, verbose=None)
-        for seg in result["segments"]:
+        result = run(piece, prompt)
+        speech = sum(max(0.0, min(end, e) - max(start, s)) for s, e in regions)
+        # The keyword prompt sometimes derails Whisper into an outro hallucination for a whole chunk.
+        if prompt and needs_retry(result, speech):
+            result = pick_richer(result, run(piece, None))
+        for seg in result:
             segments.append({
                 "start": round(start + seg["start"], 2),
                 "end": round(min(end, start + seg["end"]), 2),
@@ -61,4 +72,4 @@ def transcribe(samples: np.ndarray, model: str, keywords: str,
         on_progress((i + 1) / len(chunks))
     if not chunks:
         on_progress(1.0)
-    return clean_segments(segments)
+    return segments
