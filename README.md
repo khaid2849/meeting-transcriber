@@ -26,7 +26,7 @@ uv sync
 
 1. Kéo thả file ghi âm (wav, mp3, m4a, mp4… bất kỳ định dạng `ffmpeg` đọc được).
 2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng), chọn tách người nói.
-3. Đợi xử lý (đóng tab cũng được). Cuộc họp 1 tiếng mất khoảng 10–15 phút.
+3. Đợi xử lý (đóng tab cũng được). Mất khoảng 1/4 thời lượng cuộc họp (đo trên M5: họp 34 phút xử lý trong ~9,5 phút).
 4. Mở cuộc họp: đổi "Người 1", "Người 2"… thành tên thật, bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải bản ghi.
 
 ## File nằm ở đâu
