@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bản ghi cuộc họp</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="index">
+<main>
+  <h1>Bản ghi cuộc họp</h1>
+
+  <form class="card" id="upload-form">
+    <div class="drop" id="drop">
+      <input type="file" id="file" accept="audio/*,video/*" hidden>
+      <div id="drop-text">Kéo thả file ghi âm vào đây hoặc <a href="#" id="pick">chọn file</a></div>
+    </div>
+    <div class="row">
+      <label>Tiêu đề <input type="text" id="title" placeholder="Mặc định: tên file"></label>
+      <label style="flex:0 0 160px">Ngày họp <input type="date" id="date"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>Từ khóa / thuật ngữ (giúp nhận đúng tên riêng)
+        <input type="text" id="keywords" placeholder="VD: Odoo, Catalog AI, gói thầu, RAG"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="inline"><input type="checkbox" id="diarize" checked> Tách người nói</label>
+      <label style="flex:0 0 220px">Số người nói (để trống = tự động)
+        <input type="number" id="num-speakers" min="1" max="20"></label>
+      <button class="primary" id="submit" type="submit" disabled>Tải lên &amp; xử lý</button>
+    </div>
+    <div class="bar" id="upload-bar" hidden><div></div></div>
+    <div class="msg" id="upload-msg"></div>
+  </form>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Cuộc họp</th><th>Ngày</th><th class="hide-sm">Thời lượng</th><th>Trạng thái</th></tr></thead>
+      <tbody id="meetings"><tr><td colspan="4" class="muted">Đang tải…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
