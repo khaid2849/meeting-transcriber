@@ -11,14 +11,22 @@
 <div class="window" id="window">
   <aside class="sidebar">
     <header class="sidebar-bar">
-      <h1>Cuộc họp</h1>
-      <button class="icon-btn" id="new" title="Tải file ghi âm lên" aria-label="Tải file ghi âm lên">
+      <div class="segmented" role="tablist">
+        <button role="tab" id="tab-meetings" class="on">Cuộc họp</button>
+        <button role="tab" id="tab-chats">Hỏi AI</button>
+      </div>
+      <button class="icon-btn" id="new" title="Tải file ghi âm lên" aria-label="Tạo mới">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
       </button>
     </header>
     <nav class="list" id="list" aria-label="Danh sách cuộc họp"></nav>
+    <nav class="list" id="chat-list" aria-label="Các cuộc trò chuyện" hidden></nav>
     <footer class="sidebar-foot">
       <div class="drop-hint" id="drop-hint">Kéo thả file ghi âm vào cửa sổ để tải lên</div>
+      <button class="foot-btn" id="open-settings">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"/></svg>
+        Cài đặt AI
+      </button>
     </footer>
   </aside>
 
@@ -29,6 +37,10 @@
       </button>
       <div class="grow"></div>
       <button class="text-btn" id="retry" hidden>Chạy lại</button>
+      <button class="text-btn ask" id="ask" title="Hỏi AI về cuộc họp này" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l1.4 3.6 3.6 1.4-3.6 1.4L8 11.5 6.6 7.9 3 6.5l3.6-1.4zM12.8 10.5l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z"/></svg>
+        Hỏi AI
+      </button>
       <button class="icon-btn" id="copy" title="Copy bản ghi" aria-label="Copy bản ghi">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7.5" height="8.5" rx="1.8"/><path d="M3 10.5V4a2 2 0 0 1 2-2h5"/></svg>
       </button>
@@ -86,6 +98,35 @@
       </article>
     </div>
   </main>
+
+  <main class="detail chat-pane" id="chat-pane" hidden>
+    <header class="toolbar">
+      <button class="icon-btn back" id="chat-back" title="Danh sách" aria-label="Quay lại danh sách">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>
+      </button>
+      <input class="chat-title" id="chat-title" aria-label="Tên cuộc trò chuyện" spellcheck="false">
+      <select class="select" id="chat-provider" aria-label="Cấu hình AI"></select>
+      <button class="icon-btn" id="chat-delete" title="Xóa cuộc trò chuyện" aria-label="Xóa cuộc trò chuyện">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.2 4.5V3h3.6v1.5M4.6 4.5l.6 8.5h5.6l.6-8.5"/></svg>
+      </button>
+    </header>
+    <div class="scope" id="chat-scope"></div>
+    <div class="scroll" id="chat-scroll">
+      <div class="messages" id="messages"></div>
+    </div>
+    <footer class="composer">
+      <div class="notice" id="chat-notice" hidden></div>
+      <div class="suggestions" id="suggestions"></div>
+      <form class="prompt-box" id="composer">
+        <textarea id="prompt" rows="1" placeholder="Hỏi về nội dung cuộc họp…" aria-label="Câu hỏi"></textarea>
+        <button type="submit" class="send" id="send" aria-label="Gửi" disabled>
+          <svg class="i-send" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>
+          <svg class="i-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>
+        </button>
+      </form>
+      <p class="hint">Enter để gửi · Shift + Enter để xuống dòng</p>
+    </footer>
+  </main>
 </div>
 
 <div class="drop-overlay" id="drop-overlay" hidden><div>Thả file để tải lên</div></div>
@@ -113,7 +154,57 @@
   </form>
 </dialog>
 
+<dialog class="sheet" id="picker">
+  <form method="dialog" id="picker-form">
+    <h2 id="picker-title">Chọn cuộc họp để hỏi</h2>
+    <div class="pick-list" id="pick-list"></div>
+    <p class="sheet-msg" id="picker-msg"></p>
+    <div class="sheet-actions">
+      <button type="button" class="secondary-btn" id="picker-cancel">Hủy</button>
+      <button type="submit" class="primary-btn" id="picker-ok">Xong</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet wide" id="settings">
+  <div class="settings">
+    <h2>Cài đặt AI</h2>
+    <p class="sheet-sub">Khi bạn hỏi, bản ghi của các cuộc họp được chọn sẽ được gửi tới nhà cung cấp này. API key chỉ lưu trên máy chạy app.</p>
+    <div class="provider-list" id="provider-list"></div>
+    <form class="provider-form" id="provider-form" hidden>
+      <h3 id="pf-heading">Thêm cấu hình</h3>
+      <label class="field">Tên<input type="text" id="pf-name" placeholder="VD: Claude công ty"></label>
+      <label class="field">Nhà cung cấp
+        <select class="select" id="pf-provider">
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini (Google)</option>
+        </select>
+      </label>
+      <label class="field">API key<input type="password" id="pf-key" autocomplete="off" spellcheck="false"></label>
+      <label class="field">Model
+        <span class="row-input">
+          <input type="text" id="pf-model" list="pf-models" spellcheck="false">
+          <button type="button" class="secondary-btn" id="pf-load">Tải danh sách</button>
+        </span>
+        <datalist id="pf-models"></datalist>
+      </label>
+      <p class="sheet-msg" id="pf-msg"></p>
+      <div class="sheet-actions">
+        <button type="button" class="secondary-btn" id="pf-cancel">Hủy</button>
+        <button type="submit" class="primary-btn" id="pf-save">Lưu</button>
+      </div>
+    </form>
+    <div class="sheet-actions" id="settings-actions">
+      <button type="button" class="secondary-btn" id="pf-add">Thêm cấu hình</button>
+      <button type="button" class="primary-btn" id="settings-close">Xong</button>
+    </div>
+  </div>
+</dialog>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -200,10 +200,11 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
             raise HTTPException(400, "Chưa cấu hình AI. Mở Cài đặt AI để thêm API key.")
 
         _, usable = scope(chat["meeting_ids"])
-        system, _ = build_system_prompt(usable)
+        system, labels = build_system_prompt(usable)
         history = chat_history(chat["messages"]) + [{"role": "user", "content": question}]
         chats.append(chat_id, {"role": "user", "content": question})
-        meta = {"provider": cfg["name"], "model": cfg["model"]}
+        # Labels are saved per answer so citations keep pointing at the right meeting after scope edits.
+        meta = {"provider": cfg["name"], "model": cfg["model"], "labels": labels}
 
         def generate():
             parts: list[str] = []

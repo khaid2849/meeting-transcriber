@@ -124,6 +124,7 @@ def test_send_message_streams_and_saves(client, stores, monkeypatch):
     assert [(m["role"], m["content"]) for m in saved] == [
         ("user", "Nên chọn card gì?"), ("assistant", "Nên chọn card inference [M1 00:11:41].")]
     assert saved[1]["provider"] == "Claude" and saved[1]["model"] == "claude-opus-5-5"
+    assert saved[1]["labels"] == {"M1": done_id}
     assert chats.get(chat_id)["title"] == "Nên chọn card gì?"
 
 
