@@ -1,0 +1,155 @@
+"""Background job runner: one meeting at a time, from upload to transcript.md."""
+import logging
+import queue
+import threading
+import time
+from pathlib import Path
+from typing import Protocol
+
+import numpy as np
+
+from app.assemble import assign_speakers, render_markdown
+from app.storage import MeetingStore
+
+log = logging.getLogger(__name__)
+ACTIVE = ("converting", "transcribing", "diarizing")
+
+
+class Engine(Protocol):
+    def probe(self, path: Path) -> dict: ...
+    def extract_audio(self, src: Path, dst: Path) -> None: ...
+    def load_samples(self, path: Path) -> np.ndarray: ...
+    def transcribe(self, samples, model: str, keywords: str, on_progress) -> list[dict]: ...
+    def diarize(self, samples, num_speakers: int | None, on_progress) -> list[tuple[float, float, int]]: ...
+
+
+class RealEngine:
+    def probe(self, path):
+        from app.audio import probe
+        return probe(path)
+
+    def extract_audio(self, src, dst):
+        from app.audio import extract_audio
+        extract_audio(src, dst)
+
+    def load_samples(self, path):
+        from app.audio import load_samples
+        return load_samples(path)
+
+    def transcribe(self, samples, model, keywords, on_progress):
+        from app.asr import transcribe
+        return transcribe(samples, model, keywords, on_progress)
+
+    def diarize(self, samples, num_speakers, on_progress):
+        from app.diarize import diarize
+        return diarize(samples, num_speakers, on_progress)
+
+
+def rebuild_transcript(store: MeetingStore, meeting_id: str) -> None:
+    meeting = store.get(meeting_id)
+    utterances = store.read_json(meeting_id, "segments.json")
+    path = store.dir(meeting_id) / "transcript.md"
+    tmp = path.with_suffix(".md.tmp")
+    tmp.write_text(render_markdown(meeting, utterances), encoding="utf-8")
+    tmp.replace(path)
+
+
+class Worker:
+    def __init__(self, store: MeetingStore, engine: Engine, model: str):
+        self.store, self.engine, self.model = store, engine, model
+        self.queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.progress_interval = 2.0
+
+    def start(self) -> None:
+        self.recover()
+        threading.Thread(target=self._loop, name="transcriber", daemon=True).start()
+
+    def recover(self) -> None:
+        for m in reversed(self.store.list()):  # oldest first
+            if m.status in ACTIVE:
+                self.store.update(m.id, status="error",
+                                  error="Server bị tắt giữa chừng. Bấm \"Chạy lại\" để xử lý lại.")
+            elif m.status == "queued":
+                self.queue.put((m.id, "full"))
+
+    def enqueue(self, meeting_id: str, mode: str = "full") -> None:
+        self.store.update(meeting_id, status="queued", progress=0.0, error=None)
+        self.queue.put((meeting_id, mode))
+
+    def _loop(self) -> None:
+        while True:
+            meeting_id, mode = self.queue.get()
+            self.run_job(meeting_id, mode)
+
+    def run_job(self, meeting_id: str, mode: str) -> None:
+        try:
+            self.store.get(meeting_id)
+        except KeyError:
+            return  # deleted while queued
+        try:
+            if mode == "rediarize":
+                self._rediarize(meeting_id)
+            else:
+                self._full(meeting_id)
+        except Exception as exc:  # noqa: BLE001 — any failure must surface in the UI
+            log.exception("job %s failed", meeting_id)
+            try:
+                self.store.update(meeting_id, status="error", error=str(exc) or type(exc).__name__)
+            except KeyError:
+                pass
+
+    def _stage(self, meeting_id: str, status: str):
+        self.store.update(meeting_id, status=status, progress=0.0)
+        last = [time.monotonic()]
+
+        def on_progress(p: float) -> None:
+            now = time.monotonic()
+            if now - last[0] >= self.progress_interval:
+                last[0] = now
+                self.store.update(meeting_id, progress=round(float(p), 3))
+        return on_progress
+
+    def _full(self, meeting_id: str) -> None:
+        folder = self.store.dir(meeting_id)
+        audio = folder / "audio.m4a"
+        upload = next(folder.glob("upload.*"), None)
+        if upload is not None:
+            self._stage(meeting_id, "converting")
+            info = self.engine.probe(upload)
+            self.engine.extract_audio(upload, audio)
+            self.store.update(meeting_id, duration=info["duration"])
+            if info["has_video"]:
+                upload.unlink()
+            else:
+                upload.rename(folder / f"original{upload.suffix}")
+        elif not audio.exists():
+            raise RuntimeError("Không tìm thấy file audio của cuộc họp")
+
+        meeting = self.store.get(meeting_id)
+        on_progress = self._stage(meeting_id, "transcribing")
+        samples = self.engine.load_samples(audio)
+        segments = self.engine.transcribe(samples, self.model, meeting.keywords, on_progress)
+        self.store.write_json(meeting_id, "whisper.json", {"model": self.model, "segments": segments})
+        self.store.update(meeting_id, model=self.model)
+        self._finish(meeting_id, samples, segments)
+
+    def _rediarize(self, meeting_id: str) -> None:
+        self.store.update(meeting_id, speakers={}, diarize=True)
+        segments = self.store.read_json(meeting_id, "whisper.json")["segments"]
+        samples = self.engine.load_samples(self.store.dir(meeting_id) / "audio.m4a")
+        self._finish(meeting_id, samples, segments)
+
+    def _finish(self, meeting_id: str, samples: np.ndarray, segments: list[dict]) -> None:
+        meeting = self.store.get(meeting_id)
+        turns, warning = None, None
+        if meeting.diarize:
+            on_progress = self._stage(meeting_id, "diarizing")
+            try:
+                turns = self.engine.diarize(samples, meeting.num_speakers, on_progress)
+            except Exception as exc:  # noqa: BLE001 — transcript must survive a diarization failure
+                log.exception("diarization failed for %s", meeting_id)
+                warning = f"Tách người nói thất bại: {exc}"
+        self.store.write_json(meeting_id, "segments.json", assign_speakers(segments, turns))
+        self.store.update(meeting_id, warning=warning)
+        rebuild_transcript(self.store, meeting_id)
+        self.store.update(meeting_id, status="done", progress=1.0, error=None)
