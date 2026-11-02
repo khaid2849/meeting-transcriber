@@ -1,0 +1,25 @@
+[project]
+name = "meeting-transcriber"
+version = "0.1.0"
+description = "Local web app that turns meeting recordings into Vietnamese transcripts with speaker labels"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "mlx-whisper",
+    "sherpa-onnx",
+    "numpy",
+]
+
+[dependency-groups]
+dev = ["pytest", "httpx"]
+compare = ["transformers", "torch", "librosa"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs real models and the meeting recording"]
+addopts = "-m 'not slow'"
