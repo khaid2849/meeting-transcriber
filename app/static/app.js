@@ -507,7 +507,19 @@ window.addEventListener("drop", (e) => {
 
 /* ---------- tabs & panes ---------- */
 
-const PROVIDER_NAMES = { anthropic: "Claude", openai: "OpenAI", gemini: "Gemini" };
+const PROVIDER_NAMES = { anthropic: "Claude", openai: "OpenAI", gemini: "Gemini", openai_compat: "Tương thích OpenAI" };
+const COMPAT_PRESETS = [
+  ["Alibaba Qwen (quốc tế)", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "qwen-max"],
+  ["Alibaba Qwen (Trung Quốc)", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max"],
+  ["DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"],
+  ["OpenRouter", "https://openrouter.ai/api/v1", ""],
+  ["Groq", "https://api.groq.com/openai/v1", ""],
+  ["Mistral", "https://api.mistral.ai/v1", ""],
+  ["Together AI", "https://api.together.xyz/v1", ""],
+  ["Ollama (trên máy)", "http://localhost:11434/v1", ""],
+  ["LM Studio (trên máy)", "http://localhost:1234/v1", ""],
+];
+const SMALL_CONTEXT_TOKENS = 28000;
 const DEFAULT_MODELS = { anthropic: "claude-opus-5-5" };
 const SUGGESTIONS = [
   ["Tóm tắt", "Tóm tắt nội dung chính: chủ đề, các ý quan trọng và kết luận."],
@@ -668,6 +680,7 @@ function renderChat() {
   $("chat-scope").replaceChildren(...chips, add, tokens);
 
   const notice = $("chat-notice");
+  notice.classList.remove("warn");
   if (!providers.length) {
     const open = el("button", { className: "secondary-btn", type: "button", textContent: "Mở cài đặt" });
     open.onclick = openSettings;
@@ -676,9 +689,14 @@ function renderChat() {
   } else if (!usable.length) {
     notice.replaceChildren(el("span", { textContent: "Chưa có cuộc họp nào (đã xử lý xong) trong cuộc trò chuyện này." }));
     notice.hidden = false;
+  } else if (current?.provider === "openai_compat" && chat.estimated_tokens > SMALL_CONTEXT_TOKENS) {
+    notice.classList.add("warn");
+    notice.replaceChildren(el("span", { textContent: `Bản ghi khoảng ${formatTokens(chat.estimated_tokens)}. Model chạy trên máy hoặc model nhỏ thường chỉ nhận 8–32 nghìn token; nếu bị lỗi hoặc trả lời thiếu, hãy bớt cuộc họp.` }));
+    notice.hidden = false;
   } else {
     notice.hidden = true;
   }
+
 
   $("suggestions").replaceChildren(...(chat.messages.length || !usable.length || !providers.length ? [] : SUGGESTIONS.map(([label, prompt]) => {
     const b = el("button", { type: "button", textContent: label, title: prompt });
@@ -991,7 +1009,7 @@ function renderProviderList() {
     };
     return el("div", { className: "prov" },
       el("div", { className: "info" }, el("b", { textContent: p.name }),
-        el("span", { textContent: `${PROVIDER_NAMES[p.provider]} · ${p.model} · ${p.key_hint}` })),
+        el("span", { textContent: [PROVIDER_NAMES[p.provider], p.base_url && new URL(p.base_url).host, p.model, p.key_hint].filter(Boolean).join(" · ") })),
       ...actions, edit, del);
   }));
   if (!providers.length && $("provider-form").hidden) openProviderForm(null);
@@ -1003,9 +1021,11 @@ function openProviderForm(p) {
   $("pf-name").value = p ? p.name : "";
   $("pf-provider").value = p ? p.provider : "anthropic";
   $("pf-provider").disabled = !!p;
+  $("pf-base").value = p?.base_url || "";
+  $("pf-preset").value = "";
   $("pf-key").value = "";
-  $("pf-key").placeholder = p ? `Để trống để giữ key hiện tại (${p.key_hint})` : "Dán API key";
   $("pf-model").value = p ? p.model : DEFAULT_MODELS.anthropic;
+  syncProviderFields();
   $("pf-models").replaceChildren();
   $("pf-msg").textContent = "";
   $("pf-msg").className = "sheet-msg";
@@ -1024,14 +1044,38 @@ function formMessage(text, error = false) {
   $("pf-msg").className = `sheet-msg${error ? " error" : ""}`;
 }
 
+function syncProviderFields() {
+  const compat = $("pf-provider").value === "openai_compat";
+  $("pf-compat").hidden = !compat;
+  $("pf-key").placeholder = editing
+    ? `Để trống để giữ key hiện tại${editing.key_hint ? ` (${editing.key_hint})` : ""}`
+    : compat ? "Không bắt buộc với Ollama / LM Studio" : "Dán API key";
+}
+
+$("pf-preset").replaceChildren($("pf-preset").firstElementChild,
+  ...COMPAT_PRESETS.map(([name, url], i) => el("option", { value: String(i), textContent: `${name} · ${new URL(url).host}` })));
+$("pf-preset").onchange = () => {
+  const preset = COMPAT_PRESETS[Number($("pf-preset").value)];
+  if (!preset || $("pf-preset").value === "") return;
+  const [name, url, model] = preset;
+  $("pf-base").value = url;
+  if (!$("pf-name").value.trim()) $("pf-name").value = name;
+  if (model && !$("pf-model").value.trim()) $("pf-model").value = model;
+};
 $("pf-provider").onchange = () => {
   $("pf-model").value = DEFAULT_MODELS[$("pf-provider").value] || "";
   $("pf-models").replaceChildren();
+  syncProviderFields();
 };
 $("pf-load").onclick = async () => {
   const key = $("pf-key").value.trim();
-  const body = editing ? { provider_id: editing.id, api_key: key || null } : { provider: $("pf-provider").value, api_key: key };
-  if (!editing && !key) { formMessage("Nhập API key trước để tải danh sách model.", true); return; }
+  const compat = $("pf-provider").value === "openai_compat";
+  const base = $("pf-base").value.trim();
+  const body = editing
+    ? { provider_id: editing.id, api_key: key || null, base_url: compat ? base || null : null }
+    : { provider: $("pf-provider").value, api_key: key, base_url: compat ? base : null };
+  if (compat && !base) { formMessage("Nhập Base URL trước để tải danh sách model.", true); return; }
+  if (!editing && !compat && !key) { formMessage("Nhập API key trước để tải danh sách model.", true); return; }
   formMessage("Đang tải danh sách model…");
   try {
     const { models } = await api("/api/ai/models", { method: "POST", ...jsonBody(body) });
@@ -1045,6 +1089,7 @@ $("pf-cancel").onclick = closeProviderForm;
 $("provider-form").onsubmit = async (e) => {
   e.preventDefault();
   const body = { name: $("pf-name").value, model: $("pf-model").value, api_key: $("pf-key").value };
+  if ($("pf-provider").value === "openai_compat") body.base_url = $("pf-base").value;
   try {
     if (editing) {
       await api(`/api/ai/providers/${editing.id}`, { method: "PATCH", ...jsonBody(body) });

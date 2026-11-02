@@ -22,7 +22,7 @@ def test_add_list_never_exposes_key(tmp_path):
     public = s.public()
     assert public["default_id"] == p["id"]  # first one becomes default
     assert public["providers"] == [{"id": p["id"], "name": "Claude", "provider": "anthropic",
-                                    "model": "claude-opus-5-5", "key_hint": "sk-…9999"}]
+                                    "model": "claude-opus-5-5", "base_url": None, "key_hint": "sk-…9999"}]
     assert "secret" not in str(public)
 
 
@@ -150,3 +150,23 @@ def test_estimate_tokens_roughly_chars_over_three():
     assert estimate_tokens("a" * 300) == 100
     assert estimate_tokens("") == 0
 
+
+
+def test_openai_compatible_needs_base_url_but_key_is_optional(tmp_path):
+    s = AISettings(tmp_path / "ai.json")
+    p = s.add(name="Ollama", provider="openai_compat", api_key="", model="qwen2.5:14b",
+              base_url="http://localhost:11434/v1/")
+    pub = s.public()["providers"][0]
+    assert pub["base_url"] == "http://localhost:11434/v1" and pub["key_hint"] == ""
+    with pytest.raises(ValueError):
+        s.add(name="X", provider="openai_compat", api_key="k", model="m", base_url="")
+    with pytest.raises(ValueError):
+        s.add(name="X", provider="openai_compat", api_key="k", model="m", base_url="ftp://host/v1")
+    s.update(p["id"], base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    assert s.get(p["id"])["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+def test_builtin_providers_ignore_base_url(tmp_path):
+    s = AISettings(tmp_path / "ai.json")
+    p = s.add(name="GPT", provider="openai", api_key="sk-x-1234", model="gpt-5", base_url="http://evil/v1")
+    assert s.get(p["id"])["base_url"] is None

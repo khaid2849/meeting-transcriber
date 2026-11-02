@@ -187,8 +187,20 @@
           <option value="anthropic">Claude (Anthropic)</option>
           <option value="openai">OpenAI</option>
           <option value="gemini">Gemini (Google)</option>
+          <option value="openai_compat">Tương thích OpenAI (Qwen, DeepSeek, OpenRouter, Ollama…)</option>
         </select>
       </label>
+      <div class="compat-fields" id="pf-compat" hidden>
+        <label class="field">Điền nhanh
+          <select class="select" id="pf-preset">
+            <option value="">Chọn nhà cung cấp…</option>
+          </select>
+        </label>
+        <label class="field">Base URL
+          <input type="url" id="pf-base" placeholder="https://…/v1" spellcheck="false">
+          <small>Địa chỉ API tương thích OpenAI, thường kết thúc bằng /v1.</small>
+        </label>
+      </div>
       <label class="field">API key<input type="password" id="pf-key" autocomplete="off" spellcheck="false"></label>
       <label class="field">Model
         <span class="row-input">

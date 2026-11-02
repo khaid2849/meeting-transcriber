@@ -17,21 +17,23 @@ from app.assemble import group_paragraphs
 from app.storage import MeetingStore
 
 log = logging.getLogger(__name__)
-Provider = Literal["anthropic", "openai", "gemini"]
+Provider = Literal["anthropic", "openai", "gemini", "openai_compat"]
 INDEX = Path(__file__).resolve().parent.parent / "static" / "index.html"
 
 
 class ProviderIn(BaseModel):
     name: str
     provider: Provider
-    api_key: str
+    api_key: str = ""
     model: str
+    base_url: str | None = None
 
 
 class ProviderPatch(BaseModel):
     name: str | None = None
     model: str | None = None
     api_key: str | None = None
+    base_url: str | None = None
 
 
 class DefaultIn(BaseModel):
@@ -41,6 +43,7 @@ class DefaultIn(BaseModel):
 class ModelsIn(BaseModel):
     provider: Provider | None = None
     api_key: str | None = None
+    base_url: str | None = None
     provider_id: str | None = None
 
 
@@ -139,12 +142,17 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
             except KeyError:
                 raise HTTPException(404, "Không tìm thấy cấu hình AI") from None
             provider, key = entry["provider"], (body.api_key or "").strip() or entry["api_key"]
+            base_url = (body.base_url or "").strip().rstrip("/") or entry.get("base_url")
         else:
             provider, key = body.provider, (body.api_key or "").strip()
-        if not provider or not key:
+            base_url = (body.base_url or "").strip().rstrip("/") or None
+        if provider == "openai_compat":
+            if not base_url:
+                raise HTTPException(422, "Cần nhập Base URL")
+        elif not provider or not key:
             raise HTTPException(422, "Cần chọn nhà cung cấp và nhập API key")
         try:
-            return {"models": list_models(provider, key)}
+            return {"models": list_models(provider, key, base_url)}
         except ProviderError as exc:
             raise HTTPException(400, str(exc)) from None
 

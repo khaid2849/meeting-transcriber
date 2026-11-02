@@ -71,7 +71,7 @@ def test_provider_validation(client):
 
 def test_list_models_with_new_or_stored_key(client, monkeypatch):
     calls = []
-    monkeypatch.setattr(routes, "list_models", lambda provider, key: calls.append((provider, key)) or ["m-a", "m-b"])
+    monkeypatch.setattr(routes, "list_models", lambda provider, key, base_url=None: calls.append((provider, key)) or ["m-a", "m-b"])
     r = client.post("/api/ai/models", json={"provider": "openai", "api_key": "sk-new"})
     assert r.json() == {"models": ["m-a", "m-b"]}
     pid = add_provider(client).json()["id"]
@@ -80,7 +80,7 @@ def test_list_models_with_new_or_stored_key(client, monkeypatch):
 
 
 def test_list_models_error_is_readable(client, monkeypatch):
-    def boom(provider, key):
+    def boom(provider, key, base_url=None):
         raise ProviderError("API key không hợp lệ")
     monkeypatch.setattr(routes, "list_models", boom)
     r = client.post("/api/ai/models", json={"provider": "gemini", "api_key": "bad"})
@@ -189,3 +189,18 @@ def test_chat_url_serves_app_shell(client):
     chat_id = client.post("/api/chats", json={"meeting_ids": []}).json()["id"]
     assert client.get(f"/c/{chat_id}").text == client.get("/").text
     assert client.get("/c/000000000000").status_code == 404
+
+
+def test_openai_compatible_provider_via_api(client, monkeypatch):
+    r = client.post("/api/ai/providers", json={"name": "Qwen", "provider": "openai_compat", "api_key": "",
+                                                "model": "qwen-max", "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"})
+    assert r.status_code == 201, r.text
+    assert r.json()["base_url"].startswith("https://dashscope-intl") and r.json()["key_hint"] == ""
+    calls = []
+    monkeypatch.setattr(routes, "list_models", lambda provider, key, base_url=None: calls.append((provider, key, base_url)) or ["qwen-max"])
+    client.post("/api/ai/models", json={"provider": "openai_compat", "base_url": "http://localhost:11434/v1"})
+    client.post("/api/ai/models", json={"provider_id": r.json()["id"]})
+    assert calls == [("openai_compat", "", "http://localhost:11434/v1"),
+                     ("openai_compat", "", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")]
+    bad = client.post("/api/ai/providers", json={"name": "X", "provider": "openai_compat", "api_key": "", "model": "m"})
+    assert bad.status_code == 422

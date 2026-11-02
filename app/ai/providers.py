@@ -35,6 +35,13 @@ def anthropic_request(model: str, system: str, history: list[dict], max_tokens: 
     return req
 
 
+def openai_client_kwargs(cfg: dict) -> dict:
+    if cfg["provider"] != "openai_compat":
+        return {"api_key": cfg["api_key"]}
+    # The SDK insists on a key even for local servers (Ollama, LM Studio) that ignore it.
+    return {"api_key": cfg.get("api_key") or "not-needed", "base_url": cfg["base_url"]}
+
+
 def openai_messages(system: str, history: list[dict]) -> list[dict]:
     return [{"role": "system", "content": system}] + history
 
@@ -48,6 +55,8 @@ def gemini_contents(history: list[dict]):
 def keep_chat_models(provider: str, ids: list[str]) -> list[str]:
     if provider == "openai":
         keep = [i for i in ids if i.startswith(OPENAI_PREFIXES) and not any(x in i for x in OPENAI_EXCLUDE)]
+    elif provider == "openai_compat":
+        keep = list(ids)  # unknown naming schemes: show everything the server offers
     elif provider == "gemini":
         keep = [i for i in ids if "gemini" in i and not any(x in i for x in ("embedding", "imagen", "tts", "image"))]
     else:
@@ -93,9 +102,9 @@ def _anthropic_stream(cfg: dict, system: str, history: list[dict]) -> Iterator[s
         yield "\n\n_(Câu trả lời bị cắt vì quá dài.)_"
 
 
-def _anthropic_models(api_key: str) -> list[str]:
+def _anthropic_models(cfg: dict) -> list[str]:
     import anthropic
-    return [m.id for m in anthropic.Anthropic(api_key=api_key).models.list()]
+    return [m.id for m in anthropic.Anthropic(api_key=cfg["api_key"]).models.list()]
 
 
 # ---------- OpenAI ----------
@@ -103,16 +112,16 @@ def _anthropic_models(api_key: str) -> list[str]:
 def _openai_stream(cfg: dict, system: str, history: list[dict]) -> Iterator[str]:
     import openai
 
-    client = openai.OpenAI(api_key=cfg["api_key"])
+    client = openai.OpenAI(**openai_client_kwargs(cfg))
     stream = client.chat.completions.create(model=cfg["model"], messages=openai_messages(system, history), stream=True)
     for chunk in stream:
         if chunk.choices and chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
 
 
-def _openai_models(api_key: str) -> list[str]:
+def _openai_models(cfg: dict) -> list[str]:
     import openai
-    return [m.id for m in openai.OpenAI(api_key=api_key).models.list()]
+    return [m.id for m in openai.OpenAI(**openai_client_kwargs(cfg)).models.list()]
 
 
 # ---------- Gemini ----------
@@ -130,16 +139,18 @@ def _gemini_stream(cfg: dict, system: str, history: list[dict]) -> Iterator[str]
             yield chunk.text
 
 
-def _gemini_models(api_key: str) -> list[str]:
+def _gemini_models(cfg: dict) -> list[str]:
     from google import genai
-    return [m.name.removeprefix("models/") for m in genai.Client(api_key=api_key).models.list()
+    return [m.name.removeprefix("models/") for m in genai.Client(api_key=cfg["api_key"]).models.list()
             if "generateContent" in (m.supported_actions or [])]
 
 
 STREAMERS: dict[str, Callable[[dict, str, list[dict]], Iterator[str]]] = {
-    "anthropic": _anthropic_stream, "openai": _openai_stream, "gemini": _gemini_stream}
-LISTERS: dict[str, Callable[[str], list[str]]] = {
-    "anthropic": _anthropic_models, "openai": _openai_models, "gemini": _gemini_models}
+    "anthropic": _anthropic_stream, "openai": _openai_stream, "gemini": _gemini_stream,
+    "openai_compat": _openai_stream}
+LISTERS: dict[str, Callable[[dict], list[str]]] = {
+    "anthropic": _anthropic_models, "openai": _openai_models, "gemini": _gemini_models,
+    "openai_compat": _openai_models}
 
 
 def stream_reply(cfg: dict, system: str, history: list[dict]) -> Iterator[str]:
@@ -152,8 +163,9 @@ def stream_reply(cfg: dict, system: str, history: list[dict]) -> Iterator[str]:
         raise ProviderError(friendly_error(exc)) from exc
 
 
-def list_models(provider: str, api_key: str) -> list[str]:
+def list_models(provider: str, api_key: str, base_url: str | None = None) -> list[str]:
+    cfg = {"provider": provider, "api_key": api_key, "base_url": base_url}
     try:
-        return keep_chat_models(provider, LISTERS[provider](api_key))
+        return keep_chat_models(provider, LISTERS[provider](cfg))
     except Exception as exc:  # noqa: BLE001
         raise ProviderError(friendly_error(exc)) from exc

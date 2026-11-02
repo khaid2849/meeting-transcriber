@@ -75,3 +75,21 @@ def test_stream_reply_dispatches_by_provider(monkeypatch):
     monkeypatch.setitem(providers.STREAMERS, "openai", fake("openai"))
     out = list(providers.stream_reply({"provider": "openai", "model": "gpt-x", "api_key": "k"}, SYSTEM, HISTORY))
     assert out == ["xin ", "chào"] and seen["call"][0:2] == ("openai", "gpt-x")
+
+
+def test_openai_client_kwargs_for_compatible_providers():
+    from app.ai.providers import openai_client_kwargs
+    assert openai_client_kwargs({"provider": "openai", "api_key": "sk"}) == {"api_key": "sk"}
+    assert openai_client_kwargs({"provider": "openai_compat", "api_key": "", "base_url": "http://localhost:11434/v1"}) == {
+        "api_key": "not-needed", "base_url": "http://localhost:11434/v1"}
+
+
+def test_keep_chat_models_compatible_keeps_everything():
+    assert keep_chat_models("openai_compat", ["qwen-max", "deepseek-chat", "qwen-max"]) == ["deepseek-chat", "qwen-max"]
+
+
+def test_compatible_provider_streams_through_openai_path(monkeypatch):
+    seen = []
+    monkeypatch.setitem(providers.STREAMERS, "openai_compat", lambda cfg, s, h: iter(seen.append(cfg) or ["ok"]))
+    cfg = {"provider": "openai_compat", "model": "qwen-max", "api_key": "", "base_url": "http://x/v1"}
+    assert list(providers.stream_reply(cfg, "s", [])) == ["ok"] and seen == [cfg]

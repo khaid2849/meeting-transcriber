@@ -386,3 +386,6 @@ svg { display: block; }
   .messages { padding: 16px; }
   .scope .tokens { margin-left: 0; width: 100%; }
 }
+
+.compat-fields { display: flex; flex-direction: column; gap: 10px; }
+.notice.warn { background: color-mix(in srgb, #ff9f0a 16%, transparent); }
