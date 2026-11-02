@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import threading
 import unicodedata
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,14 +22,10 @@ class Meeting:
     id: str
     title: str
     date: str
-    status: str = "queued"  # queued|converting|transcribing|diarizing|done|error
+    status: str = "queued"  # queued|converting|transcribing|done|error
     progress: float = 0.0
     error: str | None = None
-    warning: str | None = None
     keywords: str = ""
-    diarize: bool = True
-    num_speakers: int | None = None
-    speakers: dict[str, str] = field(default_factory=dict)
     duration: float | None = None
     model: str | None = None
     original_name: str = ""
@@ -73,8 +69,7 @@ class MeetingStore:
             raise KeyError(meeting_id)
         return self.root / meeting_id
 
-    def create(self, *, title: str, date: str, keywords: str, diarize: bool,
-               num_speakers: int | None, original_name: str) -> Meeting:
+    def create(self, *, title: str, date: str, keywords: str, original_name: str) -> Meeting:
         base = slugify(title, date)
         meeting_id, n = base, 1
         while (self.root / meeting_id).exists():
@@ -82,7 +77,6 @@ class MeetingStore:
             meeting_id = f"{base}-{n}"
         (self.root / meeting_id).mkdir()
         meeting = Meeting(id=meeting_id, title=title, date=date, keywords=keywords,
-                          diarize=diarize, num_speakers=num_speakers,
                           original_name=original_name,
                           created_at=datetime.now().isoformat(timespec="microseconds"))
         self.save(meeting)

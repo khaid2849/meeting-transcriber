@@ -48,7 +48,7 @@ def transcribe(samples: np.ndarray, model: str, keywords: str,
         return mlx_whisper.transcribe(
             piece, path_or_hf_repo=model, language=LANGUAGE, initial_prompt=initial_prompt,
             condition_on_previous_text=False,
-            # Word timings cost ~3x per call on short chunks; speakers are assigned per segment.
+            # Word timings are unused and cost ~3x per call on short chunks.
             word_timestamps=False, verbose=None)["segments"]
 
     segments: list[dict] = []

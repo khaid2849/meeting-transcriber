@@ -6,7 +6,7 @@ unset VIRTUAL_ENV
 
 command -v ffmpeg >/dev/null || { echo "Thiếu ffmpeg: brew install ffmpeg"; exit 1; }
 command -v uv >/dev/null || { echo "Thiếu uv: brew install uv"; exit 1; }
-if [ ! -f models/silero_vad.onnx ] || [ ! -d models/sherpa-onnx-pyannote-segmentation-3-0 ]; then
+if [ ! -f models/silero_vad.onnx ]; then
   echo "Chưa có model. Chạy ./setup_models.sh trước."; exit 1
 fi
 

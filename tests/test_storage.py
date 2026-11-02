@@ -4,8 +4,7 @@ from app.storage import Meeting, MeetingStore, slugify
 
 
 def make(store, title="Họp", date="2026-11-02"):
-    return store.create(title=title, date=date, keywords="", diarize=True,
-                        num_speakers=None, original_name="a.wav")
+    return store.create(title=title, date=date, keywords="", original_name="a.wav")
 
 
 def test_slugify_strips_vietnamese():
@@ -35,7 +34,7 @@ def test_create_dedupes_ids(tmp_path):
 
 def test_create_sets_defaults(tmp_path):
     m = make(MeetingStore(tmp_path))
-    assert m.status == "queued" and m.progress == 0.0 and m.speakers == {}
+    assert m.status == "queued" and m.progress == 0.0
     assert m.original_name == "a.wav" and m.created_at
 
 
@@ -43,10 +42,10 @@ def test_roundtrip_and_title_edit_keeps_id(tmp_path):
     s = MeetingStore(tmp_path)
     m = make(s)
     m.title = "Khác"
-    m.speakers = {"S1": "Anh Tuấn"}
+    m.keywords = "Odoo"
     s.save(m)
     got = s.get(m.id)
-    assert got.id == m.id and got.title == "Khác" and got.speakers == {"S1": "Anh Tuấn"}
+    assert got.id == m.id and got.title == "Khác" and got.keywords == "Odoo"
     assert isinstance(got, Meeting)
 
 
@@ -112,3 +111,14 @@ def test_update_rejects_unknown_field(tmp_path):
     m = make(s)
     with pytest.raises(AttributeError):
         s.update(m.id, khong_co=1)
+
+
+def test_get_ignores_legacy_speaker_fields(tmp_path):
+    s = MeetingStore(tmp_path)
+    m = make(s)
+    path = tmp_path / m.id / "meeting.json"
+    data = __import__("json").loads(path.read_text(encoding="utf-8"))
+    data.update(diarize=True, num_speakers=3, speakers={"S1": "A"}, warning=None)
+    path.write_text(__import__("json").dumps(data), encoding="utf-8")
+    got = s.get(m.id)
+    assert not hasattr(got, "speakers") and got.title == m.title

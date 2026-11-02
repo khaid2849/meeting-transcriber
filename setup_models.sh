@@ -14,12 +14,6 @@ fetch() {  # fetch URL [OUTPUT]
 
 base=https://github.com/k2-fsa/sherpa-onnx/releases/download
 fetch "$base/asr-models/silero_vad.onnx"
-# "recongition" is the upstream release tag's spelling.
-fetch "$base/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-if [ ! -d sherpa-onnx-pyannote-segmentation-3-0 ]; then
-  fetch "$base/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-  tar xjf sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 && rm sherpa-onnx-pyannote-segmentation-3-0.tar.bz2
-fi
 cd ..
 
 echo "tải model Whisper (lần đầu mất vài phút)…"

@@ -1,10 +1,9 @@
 # Meeting Transcriber
 
-Web app chạy trên máy (macOS Apple Silicon) để chuyển file ghi âm cuộc họp thành **bản ghi tiếng Việt** có mốc thời gian và tách người nói. Mọi xử lý đều chạy trên máy, audio không gửi ra ngoài.
+Web app chạy trên máy (macOS Apple Silicon) để chuyển file ghi âm cuộc họp thành **bản ghi tiếng Việt** có mốc thời gian. Mọi xử lý đều chạy trên máy, audio không gửi ra ngoài.
 
 - Nhận dạng giọng nói: Whisper (`mlx-whisper`, chạy trên GPU Apple), ngôn ngữ cố định tiếng Việt.
-- Tách người nói: `sherpa-onnx` (pyannote segmentation + speaker embedding), không cần token/tài khoản.
-- Bỏ qua đoạn im lặng bằng VAD và lọc các câu "ảo" Whisper hay sinh ra (câu lặp, "hãy subscribe…").
+- Bỏ qua đoạn im lặng bằng VAD (silero, qua `sherpa-onnx`) và lọc các câu "ảo" Whisper hay sinh ra (câu lặp, "hãy subscribe…").
 
 ## Cài đặt (một lần)
 
@@ -25,9 +24,9 @@ uv sync
 ```
 
 1. Kéo thả file ghi âm (wav, mp3, m4a, mp4… bất kỳ định dạng `ffmpeg` đọc được).
-2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng), chọn tách người nói.
+2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng).
 3. Đợi xử lý (đóng tab cũng được). Mất khoảng 1/4 thời lượng cuộc họp (đo trên M5: họp 34 phút xử lý trong ~9,5 phút).
-4. Mở cuộc họp: đổi "Người 1", "Người 2"… thành tên thật, bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải bản ghi.
+4. Mở cuộc họp: bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải bản ghi.
 
 ## File nằm ở đâu
 
@@ -36,12 +35,12 @@ meetings/<ngày>-<tiêu-đề>/
   transcript.md    bản ghi để đọc / đưa cho AI
   audio.m4a        audio đã nén để phát lại
   original.<ext>   file audio gốc (file video thì không giữ)
-  meeting.json     tiêu đề, ngày, trạng thái, tên người nói
+  meeting.json     tiêu đề, ngày, trạng thái
   whisper.json     kết quả Whisper thô
-  segments.json    câu đã gắn người nói
+  segments.json    các câu đã lọc
 ```
 
-**Đừng sửa tay `transcript.md`**: file này được sinh lại mỗi khi đổi tên người nói.
+**Đừng sửa tay `transcript.md`**: file này được sinh lại mỗi khi đổi tiêu đề hoặc ngày.
 
 ## Hỏi đáp về cuộc họp bằng Claude Code
 

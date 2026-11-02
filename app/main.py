@@ -5,25 +5,23 @@ from contextlib import asynccontextmanager
 from datetime import date as Date
 from pathlib import Path
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 from app import config
-from app.assemble import group_paragraphs, speaker_label
+from app.assemble import group_paragraphs
 from app.storage import Meeting, MeetingStore
 from app.worker import ACTIVE, RealEngine, Worker, update_meeting
 
 STATIC = Path(__file__).parent / "static"
-MAX_SPEAKERS = 20
 
 
 class MeetingPatch(BaseModel):
     title: str | None = None
     date: str | None = None
-    speakers: dict[str, str] | None = None
 
 
 def _check_date(value: str) -> str:
@@ -32,17 +30,6 @@ def _check_date(value: str) -> str:
     except ValueError:
         raise HTTPException(422, "Ngày phải có dạng YYYY-MM-DD") from None
 
-
-def _check_speakers(value) -> int | None:
-    if value in (None, ""):
-        return None
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        raise HTTPException(422, "Số người nói phải là số") from None
-    if not 1 <= n <= MAX_SPEAKERS:
-        raise HTTPException(422, f"Số người nói phải từ 1 đến {MAX_SPEAKERS}")
-    return n
 
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
@@ -75,15 +62,12 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
 
     @app.post("/api/meetings", status_code=201)
     async def create_meeting(file: UploadFile = File(...), title: str = Form(""),
-                             date: str = Form(...), keywords: str = Form(""),
-                             diarize: bool = Form(True), num_speakers: str = Form("")) -> dict:
+                             date: str = Form(...), keywords: str = Form("")) -> dict:
         date = _check_date(date)
-        speakers = _check_speakers(num_speakers)
         name = file.filename or "audio"
         title = title.strip() or Path(name).stem
         suffix = re.sub(r"[^a-z0-9.]", "", Path(name).suffix.lower()) or ".bin"
-        meeting = store.create(title=title, date=date, keywords=keywords.strip(), diarize=diarize,
-                               num_speakers=speakers, original_name=name)
+        meeting = store.create(title=title, date=date, keywords=keywords.strip(), original_name=name)
         try:
             with open(store.dir(meeting.id) / f"upload{suffix}", "wb") as out:
                 while chunk := await file.read(1 << 20):
@@ -100,15 +84,13 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         paragraphs = []
         if meeting.status == "done":
             utterances = store.read_json(meeting_id, "segments.json")
-            for p in group_paragraphs(utterances, config.PARAGRAPH_MAX_GAP, config.PARAGRAPH_MAX_LEN):
-                paragraphs.append({"start": p["start"], "speaker": p["speaker"],
-                                   "label": speaker_label(p["speaker"], meeting.speakers),
-                                   "text": p["text"]})
+            paragraphs = [{"start": p["start"], "text": p["text"]} for p in
+                          group_paragraphs(utterances, config.PARAGRAPH_MAX_GAP, config.PARAGRAPH_MAX_LEN)]
         return {"meeting": meeting.to_dict(), "paragraphs": paragraphs}
 
     @app.patch("/api/meetings/{meeting_id}")
     def patch_meeting(meeting_id: str, patch: MeetingPatch) -> dict:
-        meeting = get_or_404(meeting_id)
+        get_or_404(meeting_id)
         changes = {}
         if patch.title is not None:
             if not patch.title.strip():
@@ -116,24 +98,15 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
             changes["title"] = patch.title.strip()
         if patch.date is not None:
             changes["date"] = _check_date(patch.date)
-        if patch.speakers is not None:
-            changes["speakers"] = {k: v.strip() for k, v in patch.speakers.items() if v.strip()}
         return update_meeting(store, meeting_id, **changes).to_dict()
 
     @app.post("/api/meetings/{meeting_id}/retry")
     def retry(meeting_id: str) -> dict:
         if get_or_404(meeting_id).status != "error":
             raise HTTPException(409, "Chỉ chạy lại được cuộc họp bị lỗi")
-        worker.enqueue(meeting_id, "full")
+        worker.enqueue(meeting_id)
         return store.get(meeting_id).to_dict()
 
-    @app.post("/api/meetings/{meeting_id}/rediarize")
-    def rediarize(meeting_id: str, num_speakers: int | None = Body(None, embed=True)) -> dict:
-        if get_or_404(meeting_id).status != "done":
-            raise HTTPException(409, "Chỉ tách lại được khi cuộc họp đã xử lý xong")
-        store.update(meeting_id, num_speakers=_check_speakers(num_speakers))
-        worker.enqueue(meeting_id, "rediarize")
-        return store.get(meeting_id).to_dict()
 
     @app.delete("/api/meetings/{meeting_id}", status_code=204)
     def delete(meeting_id: str) -> Response:

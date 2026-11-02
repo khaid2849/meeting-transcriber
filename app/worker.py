@@ -8,11 +8,12 @@ from typing import Protocol
 
 import numpy as np
 
-from app.assemble import assign_speakers, render_markdown
+from app.assemble import render_markdown, to_utterances
 from app.filters import clean_segments
 from app.storage import Meeting, MeetingStore, write_text_atomic
 
 log = logging.getLogger(__name__)
+# "diarizing" only appears in meeting.json files written before speaker separation was removed.
 ACTIVE = ("converting", "transcribing", "diarizing")
 
 
@@ -21,7 +22,6 @@ class Engine(Protocol):
     def extract_audio(self, src: Path, dst: Path) -> None: ...
     def load_samples(self, path: Path) -> np.ndarray: ...
     def transcribe(self, samples, model: str, keywords: str, on_progress) -> list[dict]: ...
-    def diarize(self, samples, num_speakers: int | None, on_progress) -> list[tuple[float, float, int]]: ...
 
 
 class RealEngine:
@@ -40,10 +40,6 @@ class RealEngine:
     def transcribe(self, samples, model, keywords, on_progress):
         from app.asr import transcribe
         return transcribe(samples, model, keywords, on_progress)
-
-    def diarize(self, samples, num_speakers, on_progress):
-        from app.diarize import diarize
-        return diarize(samples, num_speakers, on_progress)
 
 
 def rebuild_transcript(store: MeetingStore, meeting_id: str) -> None:
@@ -65,7 +61,7 @@ def update_meeting(store: MeetingStore, meeting_id: str, **changes) -> Meeting:
 class Worker:
     def __init__(self, store: MeetingStore, engine: Engine, model: str):
         self.store, self.engine, self.model = store, engine, model
-        self.queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.queue: queue.Queue[str] = queue.Queue()
         self.progress_interval = 2.0
 
     def start(self) -> None:
@@ -78,30 +74,27 @@ class Worker:
                 self.store.update(m.id, status="error",
                                   error="Server bị tắt giữa chừng. Bấm \"Chạy lại\" để xử lý lại.")
             elif m.status == "queued":
-                self.queue.put((m.id, "full"))
+                self.queue.put(m.id)
 
-    def enqueue(self, meeting_id: str, mode: str = "full") -> None:
+    def enqueue(self, meeting_id: str) -> None:
         self.store.update(meeting_id, status="queued", progress=0.0, error=None)
-        self.queue.put((meeting_id, mode))
+        self.queue.put(meeting_id)
 
     def _loop(self) -> None:
         while True:
-            meeting_id, mode = self.queue.get()
+            meeting_id = self.queue.get()
             try:
-                self.run_job(meeting_id, mode)
+                self.run_job(meeting_id)
             except Exception:  # noqa: BLE001 — never let one job kill the worker thread
                 log.exception("worker crashed on %s", meeting_id)
 
-    def run_job(self, meeting_id: str, mode: str) -> None:
+    def run_job(self, meeting_id: str) -> None:
         try:
             self.store.get(meeting_id)
         except KeyError:
             return  # deleted while queued
         try:
-            if mode == "rediarize":
-                self._rediarize(meeting_id)
-            else:
-                self._full(meeting_id)
+            self._full(meeting_id)
         except Exception as exc:  # noqa: BLE001 — any failure must surface in the UI
             log.exception("job %s failed", meeting_id)
             try:
@@ -142,29 +135,13 @@ class Worker:
         segments = self.engine.transcribe(samples, self.model, meeting.keywords, on_progress)
         self.store.write_json(meeting_id, "whisper.json", {"model": self.model, "segments": segments})
         self.store.update(meeting_id, model=self.model)
-        self._finish(meeting_id, samples, segments)
+        self._finish(meeting_id, segments)
 
-    def _rediarize(self, meeting_id: str) -> None:
-        self.store.update(meeting_id, speakers={}, diarize=True)
-        segments = self.store.read_json(meeting_id, "whisper.json")["segments"]
-        samples = self.engine.load_samples(self.store.dir(meeting_id) / "audio.m4a")
-        self._finish(meeting_id, samples, segments)
-
-    def _finish(self, meeting_id: str, samples: np.ndarray, segments: list[dict]) -> None:
+    def _finish(self, meeting_id: str, segments: list[dict]) -> None:
         def log_drop(seg: dict, reason: str) -> None:
             log.info("%s: dropped %s segment at %.1fs: %r", meeting_id, reason, seg["start"], seg["text"])
 
-        segments = clean_segments(segments, on_drop=log_drop)
-        meeting = self.store.get(meeting_id)
-        turns, warning = None, None
-        if meeting.diarize:
-            on_progress = self._stage(meeting_id, "diarizing")
-            try:
-                turns = self.engine.diarize(samples, meeting.num_speakers, on_progress)
-            except Exception as exc:  # noqa: BLE001 — transcript must survive a diarization failure
-                log.exception("diarization failed for %s", meeting_id)
-                warning = f"Tách người nói thất bại: {exc}"
-        self.store.write_json(meeting_id, "segments.json", assign_speakers(segments, turns))
-        self.store.update(meeting_id, warning=warning)
+        utterances = to_utterances(clean_segments(segments, on_drop=log_drop))
+        self.store.write_json(meeting_id, "segments.json", utterances)
         rebuild_transcript(self.store, meeting_id)
         self.store.update(meeting_id, status="done", progress=1.0, error=None)

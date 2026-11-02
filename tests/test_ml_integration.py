@@ -28,19 +28,5 @@ def test_transcribe_excerpt(samples):
     assert len(segs) >= 3
     assert all(0 <= s["start"] <= s["end"] <= 60.5 for s in segs)
     assert all(s["text"].strip() for s in segs)
-    assert all(0 <= w["start"] <= 60.5 for s in segs for w in s["words"])
     assert progress and progress[-1] == pytest.approx(1.0)
 
-
-def test_diarize_excerpt(samples):
-    from app.diarize import diarize
-    progress = []
-    turns = diarize(samples, None, progress.append)
-    assert turns and all(spk >= 0 and 0 <= a < b <= 60.5 for a, b, spk in turns)
-    assert progress and progress[-1] == pytest.approx(1.0)
-
-
-def test_diarize_fixed_speaker_count(samples):
-    from app.diarize import diarize
-    turns = diarize(samples, 2, lambda p: None)
-    assert {spk for _, _, spk in turns} <= {0, 1}

@@ -41,18 +41,15 @@ th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line
 th { font-size: 13px; color: var(--muted); font-weight: 500; }
 .status-done { color: var(--ok); } .status-error { color: var(--danger); }
 .status-active { color: var(--accent); }
-.warn { color: var(--warn); }
 .title-input { font-size: 20px; font-weight: 600; width: 100%; border: 1px solid transparent !important;
   background: transparent !important; padding: 2px 4px !important; }
 .title-input:hover, .title-input:focus { border-color: var(--line) !important; }
 .player { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 8px 0; }
 audio { width: 100%; }
-.speakers { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin: 8px 0; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .para { padding: 6px 8px; border-radius: 6px; }
 .para.current { background: var(--hl); }
 .ts { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--accent);
   background: none; border: none; padding: 0; margin-right: 6px; }
-.who { font-weight: 600; margin-right: 4px; }
 .msg { margin-top: 8px; font-size: 14px; }
 @media (max-width: 600px) { .hide-sm { display: none; } }

@@ -1,6 +1,6 @@
 # Meeting Transcriber — Thiết kế
 
-Ngày: 2026-11-02 · Trạng thái: chờ duyệt (đã qua builder check)
+Ngày: 2026-11-02 · Trạng thái: đã duyệt, đã triển khai. Cập nhật 2026-11-02: bỏ tách người nói (xem §6).
 
 ## 1. Mục đích và lý do
 
@@ -14,7 +14,7 @@ App là web app chạy trên máy cá nhân (macOS, Apple M5, RAM 16 GB), chỉ 
 
 1. Upload một file ghi âm cuộc họp (kích thước tới khoảng 1 GB, ví dụ file đầu tiên khoảng 189 MB) qua giao diện web.
 2. App tự chuyển giọng nói thành văn bản **ngay trên máy**, có mốc thời gian.
-3. Tách theo người nói (nếu làm được), gắn nhãn "Người 1", "Người 2"…; người dùng **đổi được nhãn thành tên thật** trong app, bản ghi cập nhật theo.
+3. ~~Tách theo người nói~~: đã bỏ theo quyết định của người dùng (§6).
 4. Xem danh sách cuộc họp; mở từng cuộc để đọc bản ghi; copy hoặc tải về dạng Markdown.
 5. Mỗi cuộc họp được lưu thành **file văn bản thường trên đĩa**, để người dùng mở Claude Code tại thư mục đó và hỏi trực tiếp (kể cả hỏi xuyên nhiều cuộc họp).
 
@@ -24,15 +24,14 @@ App là web app chạy trên máy cá nhân (macOS, Apple M5, RAM 16 GB), chỉ 
 - Không có ô chat, hỏi đáp hay tìm kiếm trong app.
 - Không nhiều người dùng, không đăng nhập, không deploy lên server.
 - Không ghi âm trực tiếp trong app (chỉ upload file có sẵn).
-- Không nhận diện tên người nói tự động (chỉ phân biệt giọng).
-- **Không sửa chữ trong bản ghi** ở bản đầu (người dùng đã đồng ý). README ghi rõ: không sửa tay `transcript.md`, vì file này được sinh lại khi đổi tên người nói. Nếu dùng thực tế thấy cùng một từ bị nghe sai lặp lại nhiều, bản sau sẽ thêm "tìm và thay thế" (lưu vào `segments.json`).
+- **Không tách người nói** (không phân biệt ai nói câu nào, không đổi tên người nói).
+- **Không sửa chữ trong bản ghi** ở bản đầu (người dùng đã đồng ý). README ghi rõ: không sửa tay `transcript.md`, vì file này được sinh lại khi đổi tiêu đề hoặc ngày. Nếu dùng thực tế thấy cùng một từ bị nghe sai lặp lại nhiều, bản sau sẽ thêm "tìm và thay thế" (lưu vào `segments.json`).
 
 ## 4. Anti-goals (điều khiến app thất bại dù chạy được)
 
 - Gửi audio hoặc bản ghi ra dịch vụ bên ngoài. Toàn bộ xử lý phải ở trên máy.
 - Bản ghi bị "làm đẹp", tóm lược hay bỏ đoạn. Phải ghi đủ những gì được nói, kể cả khi có lỗi nhận dạng.
 - Dữ liệu bị khóa trong định dạng riêng của app. File `transcript.md` phải đọc được bằng mắt và bằng Claude Code mà không cần app.
-- Tách người nói lỗi làm hỏng cả bản ghi. Nếu bước tách người nói thất bại thì vẫn phải có bản ghi liền mạch.
 
 ## 5. Ràng buộc
 
@@ -45,22 +44,18 @@ App là web app chạy trên máy cá nhân (macOS, Apple M5, RAM 16 GB), chỉ 
 
 - Có web app chạy trên máy này, mở bằng trình duyệt.
 - Luồng: upload → chuyển thành văn bản → xem. Không có bước tóm tắt.
-- Tách người nói: "được thì càng tốt".
-- Đổi tên người nói ngay trong app.
+- **Bỏ tách người nói**: người dùng quyết định không cần, sau khi xem kết quả chạy thật.
 - Không sửa chữ trong bản ghi ở bản đầu.
-- Số người nói mỗi cuộc họp không biết trước. Vì vậy mặc định là **tự động dò**; ô nhập số người nói chỉ là tùy chọn.
 - Hỏi đáp và overview: người dùng tự làm bằng Claude, bên ngoài app.
 
 ## 7. Những gì Claude tự quyết (người dùng chưa duyệt từng điểm)
 
 - **Model chuyển giọng nói thành văn bản:** ưu tiên độ chính xác hơn tốc độ (ngưỡng chấp nhận: cuộc họp 2 tiếng xử lý xong trong khoảng 30 phút). Bước đầu của kế hoạch là **so sánh nhanh** trên khoảng 10 phút cắt từ file họp thật: Whisper `large-v3` và `large-v3-turbo` qua MLX (`mlx-whisper`), thêm PhoWhisper-large nếu chạy được trên máy. Chọn model tốt nhất làm mặc định và để model là một tùy chọn cấu hình. Ngôn ngữ cố định `vi` thay vì tự dò, vì tự dò dễ sai khi chen tiếng Anh.
 - **Chống "ảo giác" của Whisper:** dùng VAD để bỏ qua đoạn im lặng hoặc nhạc, tắt `condition_on_previous_text`, bỏ những vòng lặp cùng một câu lặp liên tục. Các đoạn này không phải lời nói thật nên không vi phạm anti-goal "không bỏ nội dung".
-- **Chạy lại tách người nói** cho cuộc họp đã xong (ví dụ để đổi số người nói) mà không cần chuyển lại văn bản: lưu kết quả Whisper thô riêng (`whisper.json`) tách khỏi kết quả tách người nói. Chạy lại thì các tên đã đặt bị xóa (có cảnh báo trước).
 - **Định dạng audio:** chấp nhận mọi định dạng `ffmpeg` đọc được, kể cả video (mp4…). Lúc upload, trích ra một bản audio nén (ví dụ `audio.m4a`) để xử lý và phát trên trình duyệt. File gốc chỉ giữ khi đó đã là file audio, file video thì không giữ.
-- **Tách người nói:** dùng thư viện không cần token, ví dụ `sherpa-onnx` speaker diarization (segmentation pyannote bản ONNX + model nhúng giọng nói). Gộp kết quả với các đoạn Whisper theo thời gian chồng lấn. Có thể chọn số người nói khi upload, hoặc để "tự động".
 - **Ô "từ khóa / thuật ngữ"** (tùy chọn) khi upload, được đưa vào làm `initial_prompt` cho Whisper (ví dụ: "Odoo, Catalog AI, gói thầu, RAG") để nhận đúng tên riêng.
 - **Backend Python** (FastAPI hoặc tương đương) + giao diện HTML/JS đơn giản phục vụ ngay từ backend, không cần bước build frontend. Chạy bằng một lệnh (`./run.sh`), mở `http://localhost:8765`.
-- **Xử lý nền, mỗi lần một job:** upload xong trả về ngay; trang hiện trạng thái (đang chờ / đang chuyển đổi x% / đang tách người nói / xong / lỗi). Đóng tab rồi mở lại vẫn thấy tiến độ. Nếu server tắt giữa chừng thì job đó chuyển sang "lỗi", có nút **chạy lại**.
+- **Xử lý nền, mỗi lần một job:** upload xong trả về ngay; trang hiện trạng thái (đang chờ / đang chuyển đổi / đang chuyển thành văn bản x% / xong / lỗi). Đóng tab rồi mở lại vẫn thấy tiến độ. Nếu server tắt giữa chừng thì job đó chuyển sang "lỗi", có nút **chạy lại**.
 - **Giữ file audio gốc** trong thư mục cuộc họp và có trình phát audio trên trang chi tiết; **bấm vào mốc thời gian thì audio nhảy tới đoạn đó**, để kiểm tra những chỗ nghi nhận dạng sai.
 - **Sửa tiêu đề và ngày họp** được; **xóa cuộc họp** được (có xác nhận).
 
@@ -71,9 +66,9 @@ App là web app chạy trên máy cá nhân (macOS, Apple M5, RAM 16 GB), chỉ 
   meetings/
     2026-11-02-ha-tang-ai/
       audio.m4a            # audio đã trích/nén để xử lý và phát
-      meeting.json         # metadata: tiêu đề, ngày, thời lượng, trạng thái, map tên người nói
-      whisper.json         # kết quả Whisper thô (để chạy lại tách người nói)
-      segments.json        # đã gộp người nói: [{start, end, speaker_id, text}]
+      meeting.json         # metadata: tiêu đề, ngày, thời lượng, trạng thái
+      whisper.json         # kết quả Whisper thô, trước khi lọc câu "ảo"
+      segments.json        # các câu đã lọc: [{start, end, text}]
       transcript.md        # bản ghi để đọc, sinh lại từ segments.json + map tên
 ```
 
@@ -81,21 +76,21 @@ App là web app chạy trên máy cá nhân (macOS, Apple M5, RAM 16 GB), chỉ 
 
 ```markdown
 # Hạ tầng AI — hỏi đáp kinh nghiệm
-Ngày: 2026-11-02 · Thời lượng: 1:52:10 · Người nói: Anh Tuấn, Người 2, Người 3
+Ngày: 2026-11-02 · Thời lượng: 1:52:10
 
-**[00:00:05] Anh Tuấn:** Hôm nay mình bàn về hạ tầng cho Catalog AI…
+**[00:00:05]** Hôm nay mình bàn về hạ tầng cho Catalog AI…
 
-**[00:01:12] Người 2:** Bên mình đang dùng…
+**[00:01:12]** Bên mình đang dùng…
 ```
 
-Các câu liên tiếp của cùng một người được gộp thành một đoạn, mỗi đoạn mở đầu bằng mốc thời gian. Khi đổi tên người nói thì chỉ cập nhật `meeting.json` và sinh lại `transcript.md`; `segments.json` không đổi.
+Các câu gần nhau (cách nhau ≤ 2 giây) được gộp thành một đoạn tối đa khoảng 1 phút, mỗi đoạn mở đầu bằng mốc thời gian. Khi đổi tiêu đề/ngày thì chỉ cập nhật `meeting.json` và sinh lại `transcript.md`; `segments.json` không đổi.
 
 Thư mục `meetings/` là thứ người dùng mở Claude Code để hỏi đáp.
 
 ## 9. Màn hình
 
-1. **Danh sách cuộc họp:** nút upload (kéo thả file + tiêu đề + ngày + từ khóa + bật/tắt tách người nói + số người nói), bảng các cuộc họp (tiêu đề, ngày, thời lượng, trạng thái/tiến độ).
-2. **Chi tiết cuộc họp:** tiêu đề, trình phát audio, bảng đổi tên người nói (Người 1 → ô nhập tên), bản ghi theo đoạn có mốc thời gian bấm được, nút copy toàn bộ và tải `transcript.md`.
+1. **Danh sách cuộc họp:** nút upload (kéo thả file + tiêu đề + ngày + từ khóa), bảng các cuộc họp (tiêu đề, ngày, thời lượng, trạng thái/tiến độ).
+2. **Chi tiết cuộc họp:** tiêu đề, trình phát audio, bản ghi theo đoạn có mốc thời gian bấm được, nút copy toàn bộ và tải `transcript.md`.
 
 ## 10. Để builder quyết
 
@@ -103,10 +98,8 @@ Thư mục `meetings/` là thứ người dùng mở Claude Code để hỏi đ�
 - Cách đặt slug thư mục cuộc họp.
 - Ngưỡng gộp câu thành đoạn.
 - Cách cài đặt và tải model (script setup), miễn là có hướng dẫn chạy rõ ràng trong README.
-- Nếu `sherpa-onnx` không chạy tốt thì đổi giải pháp tách người nói khác, miễn là không cần token và vẫn chạy trên máy.
 
 ## 11. Kiểm chứng
 
-- File họp thật đầu tiên: `~/Works/meeting-transcriber/cuoc_hop_20261102_143735.wav` (WAV PCM 16-bit, 48 kHz, mono, 34:32, 189 MB; không rõ thiết bị ghi, không rõ số người). Dùng file này cho bước so sánh model và chạy thử đầu-cuối: phải có `transcript.md` đầy đủ, mốc thời gian khớp audio, có tách người nói. Số người và chất lượng tách người nói do người dùng nghe kiểm tra.
-- Tắt tách người nói: vẫn ra bản ghi liền mạch.
-- Đổi tên người nói: `transcript.md` trên đĩa cập nhật đúng.
+- File họp thật đầu tiên: `~/Works/meeting-transcriber/cuoc_hop_20261102_143735.wav` (WAV PCM 16-bit, 48 kHz, mono, 34:32, 189 MB). Dùng file này cho bước so sánh model và chạy thử đầu-cuối: phải có `transcript.md` đầy đủ, mốc thời gian khớp audio.
+- Đổi tiêu đề: `transcript.md` trên đĩa cập nhật đúng.

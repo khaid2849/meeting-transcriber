@@ -4,11 +4,11 @@ const STATUS = {
   queued: "Đang chờ",
   converting: "Đang chuyển định dạng",
   transcribing: "Đang chuyển thành văn bản",
-  diarizing: "Đang tách người nói",
   done: "Xong",
   error: "Lỗi",
 };
-const ACTIVE = ["queued", "converting", "transcribing", "diarizing"];
+const ACTIVE = ["queued", "converting", "transcribing"];
+const RUNNING = ["converting", "transcribing"];
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...children) {
@@ -26,7 +26,7 @@ function fmtTime(sec) {
 
 function statusText(m) {
   let t = STATUS[m.status] || m.status;
-  if (["converting", "transcribing", "diarizing"].includes(m.status) && m.progress > 0) {
+  if (RUNNING.includes(m.status) && m.progress > 0) {
     t += ` ${Math.round(m.progress * 100)}%`;
   }
   return t;
@@ -77,7 +77,6 @@ function initIndex() {
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
-  $("diarize").onchange = () => { $("num-speakers").disabled = !$("diarize").checked; };
 
   $("upload-form").onsubmit = (e) => {
     e.preventDefault();
@@ -88,8 +87,6 @@ function initIndex() {
     form.append("title", $("title").value);
     form.append("date", $("date").value);
     form.append("keywords", $("keywords").value);
-    form.append("diarize", $("diarize").checked ? "true" : "false");
-    form.append("num_speakers", $("diarize").checked ? $("num-speakers").value : "");
 
     const xhr = new XMLHttpRequest();
     const bar = $("upload-bar");
@@ -141,7 +138,6 @@ function initIndex() {
       el("td", { className: "hide-sm", textContent: fmtTime(m.duration) }),
       el("td", {},
         el("span", { className: statusClass(m), textContent: statusText(m) }),
-        m.warning ? el("span", { className: "warn", title: m.warning, textContent: " ⚠" }) : "",
       ),
     ));
     $("meetings").replaceChildren(...(rows.length ? rows
@@ -158,7 +154,7 @@ function initMeeting() {
   const audio = $("audio");
   let meeting = null;
   let timer = null;
-  let renderedFor = null;
+  let rendered = false;
 
   async function save(changes) {
     try {
@@ -199,21 +195,6 @@ function initMeeting() {
     load();
   };
 
-  $("rediarize").onclick = async () => {
-    const answer = prompt("Số người nói (để trống = tự động dò):", meeting.num_speakers || "");
-    if (answer === null) return;
-    if (Object.keys(meeting.speakers).length
-        && !confirm("Tách lại sẽ xóa các tên người nói đã đặt. Tiếp tục?")) return;
-    try {
-      await api(`/api/meetings/${id}/rediarize`, {
-        method: "POST", ...jsonBody({ num_speakers: answer.trim() ? Number(answer) : null }),
-      });
-    } catch (err) {
-      alert(err.message);
-    }
-    renderedFor = null;
-    load();
-  };
 
   $("delete").onclick = async () => {
     if (!confirm(`Xóa cuộc họp "${meeting.title}" và toàn bộ file của nó?`)) return;
@@ -225,25 +206,7 @@ function initMeeting() {
     }
   };
 
-  $("save-speakers").onclick = async () => {
-    const speakers = {};
-    for (const input of $("speakers").querySelectorAll("input")) speakers[input.dataset.id] = input.value;
-    if (await save({ speakers })) {
-      $("speakers-msg").textContent = "Đã lưu, bản ghi đã cập nhật.";
-      renderedFor = null;
-      load();
-    }
-  };
 
-  function renderSpeakers(paragraphs) {
-    const ids = [...new Set(paragraphs.map((p) => p.speaker).filter(Boolean))];
-    $("speakers-card").hidden = !ids.length;
-    $("speakers").replaceChildren(...ids.map((sid) => {
-      const input = el("input", { type: "text", value: meeting.speakers[sid] || "", placeholder: `Người ${sid.slice(1)}` });
-      input.dataset.id = sid;
-      return el("label", {}, `Người ${sid.slice(1)}`, input);
-    }));
-  }
 
   function renderTranscript(paragraphs) {
     const nodes = paragraphs.map((p) => {
@@ -251,7 +214,6 @@ function initMeeting() {
       ts.onclick = () => { audio.currentTime = p.start; audio.play(); };
       const node = el("p", { className: "para" }, ts);
       node.dataset.start = p.start;
-      if (p.label) node.append(el("span", { className: "who", textContent: `${p.label}:` }));
       node.append(p.text);
       return node;
     });
@@ -291,31 +253,24 @@ function initMeeting() {
     status.className = `msg ${statusClass(meeting)}`;
     status.textContent = meeting.status === "error" ? `Lỗi: ${meeting.error}`
       : meeting.status === "done" ? "" : statusText(meeting);
-    if (meeting.status === "done" && meeting.warning) {
-      status.className = "msg warn";
-      status.textContent = `⚠ ${meeting.warning}`;
-    }
     $("bar").hidden = !active;
     $("bar").firstElementChild.style.width = `${Math.round((meeting.progress || 0) * 100)}%`;
 
     const done = meeting.status === "done";
     $("retry").hidden = meeting.status !== "error";
-    $("copy").disabled = $("download").disabled = $("rediarize").disabled = !done;
-    $("delete").disabled = ["converting", "transcribing", "diarizing"].includes(meeting.status);
+    $("copy").disabled = $("download").disabled = !done;
+    $("delete").disabled = RUNNING.includes(meeting.status);
 
-    const hasAudio = done || meeting.status === "diarizing";
-    $("player").hidden = !hasAudio;
-    if (hasAudio && !audio.src) audio.src = `/api/meetings/${id}/audio`;
+    $("player").hidden = !done;
+    if (done && !audio.src) audio.src = `/api/meetings/${id}/audio`;
 
-    if (done && renderedFor !== JSON.stringify(meeting.speakers)) {
-      renderSpeakers(data.paragraphs);
+    if (done && !rendered) {
       renderTranscript(data.paragraphs);
-      renderedFor = JSON.stringify(meeting.speakers);
+      rendered = true;
     } else if (!done) {
-      $("speakers-card").hidden = true;
       $("transcript").replaceChildren(el("p", { className: "muted",
         textContent: active ? "Bản ghi sẽ hiện ở đây khi xử lý xong." : "Chưa có bản ghi." }));
-      renderedFor = null;
+      rendered = false;
     }
     if (active) timer = setTimeout(load, 2000);
   }

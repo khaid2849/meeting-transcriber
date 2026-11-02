@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Update 2026-11-02:** speaker separation was removed at the user's request after the real-meeting run. Everything below about diarization, speaker labels, renaming and re-diarization (Tasks 3, 5–8) is historical; see the spec for the current scope.
+
 **Goal:** Local web app: upload a meeting recording → on-device Vietnamese transcript with timestamps and (optional) speaker labels the user can rename → stored as plain Markdown per meeting.
 
 **Architecture:** One FastAPI process serves a vanilla HTML/JS UI and a JSON API, and runs a single background worker thread that processes one job at a time (ffmpeg → VAD → mlx-whisper → sherpa-onnx diarization → merge → `transcript.md`). All state lives on disk under `meetings/<id>/`; no database.
