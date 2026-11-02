@@ -156,3 +156,12 @@ def test_tailnet_host_accepted_when_allowed(store, worker):
     c = TestClient(app)
     assert c.get("/api/meetings", headers={"Host": "khaid-1.tail18735e.ts.net"}).status_code == 200
     assert c.get("/api/meetings", headers={"Host": "evil.ts.net"}).status_code == 400
+
+
+def test_favicon_and_manifest_served(client):
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    m = client.get("/static/manifest.webmanifest")
+    assert m.status_code == 200 and m.json()["name"] == "Bản ghi cuộc họp"
+    assert client.get("/static/icon.svg").status_code == 200
+    assert client.get("/static/apple-touch-icon.png").status_code == 200

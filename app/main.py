@@ -60,6 +60,10 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         except KeyError:
             raise HTTPException(404, "Không tìm thấy cuộc họp") from None
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse(STATIC / "favicon.png", media_type="image/png")
+
     @app.get("/", include_in_schema=False)
     def index():
         return FileResponse(STATIC / "index.html")

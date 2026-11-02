@@ -21,7 +21,11 @@ if command -v tailscale >/dev/null; then
 fi
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-for _ in $(seq 1 10); do  # bootout returns before the old process has released the port
+for _ in $(seq 1 10); do  # bootout returns before launchd has fully removed the service
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+  sleep 1
+done
+for _ in $(seq 1 10); do  # ...and before the old process has released the port
   lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 || break
   sleep 1
 done
@@ -62,7 +66,11 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 plutil -lint "$PLIST" >/dev/null
-launchctl bootstrap "$DOMAIN" "$PLIST"
+for attempt in 1 2 3 4 5; do  # "Bootstrap failed: 5" is transient right after a bootout
+  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null && break
+  [ "$attempt" = 5 ] && { echo "launchctl bootstrap thất bại. Thử lại: ./install-service.sh"; exit 1; }
+  sleep 2
+done
 
 for _ in $(seq 1 30); do
   if curl -fs -o /dev/null "http://localhost:$PORT/"; then
