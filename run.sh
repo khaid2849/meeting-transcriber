@@ -11,6 +11,9 @@ if [ ! -f models/silero_vad.onnx ]; then
 fi
 
 URL=http://localhost:8765
+if curl -fs -o /dev/null "$URL/"; then
+  echo "App đang chạy sẵn (service) tại $URL"; open "$URL"; exit 0
+fi
 (sleep 3; open "$URL") &
 export HF_HUB_OFFLINE=1  # models are local after setup; no network at runtime
-exec uv run uvicorn --factory app.main:build_app --host 127.0.0.1 --port 8765
+exec uv run uvicorn --factory app.main:build_app --host 127.0.0.1 --port 8765 --no-access-log
