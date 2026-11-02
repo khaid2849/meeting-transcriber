@@ -54,7 +54,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     @app.get("/m/{meeting_id}", include_in_schema=False)
     def meeting_page(meeting_id: str):
         get_or_404(meeting_id)
-        return FileResponse(STATIC / "meeting.html")
+        return FileResponse(STATIC / "index.html")
 
     @app.get("/api/meetings")
     def list_meetings() -> list[dict]:

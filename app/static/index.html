@@ -3,40 +3,117 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Bản ghi cuộc họp</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-page="index">
-<main>
-  <h1>Bản ghi cuộc họp</h1>
+<body>
+<div class="window" id="window">
+  <aside class="sidebar">
+    <header class="sidebar-bar">
+      <h1>Cuộc họp</h1>
+      <button class="icon-btn" id="new" title="Tải file ghi âm lên" aria-label="Tải file ghi âm lên">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+      </button>
+    </header>
+    <nav class="list" id="list" aria-label="Danh sách cuộc họp"></nav>
+    <footer class="sidebar-foot">
+      <div class="drop-hint" id="drop-hint">Kéo thả file ghi âm vào cửa sổ để tải lên</div>
+    </footer>
+  </aside>
 
-  <form class="card" id="upload-form">
-    <div class="drop" id="drop">
+  <main class="detail" id="detail">
+    <header class="toolbar">
+      <button class="icon-btn back" id="back" title="Danh sách" aria-label="Quay lại danh sách">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>
+      </button>
+      <div class="grow"></div>
+      <button class="text-btn" id="retry" hidden>Chạy lại</button>
+      <button class="icon-btn" id="copy" title="Copy bản ghi" aria-label="Copy bản ghi">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7.5" height="8.5" rx="1.8"/><path d="M3 10.5V4a2 2 0 0 1 2-2h5"/></svg>
+      </button>
+      <button class="icon-btn" id="download" title="Tải file .md" aria-label="Tải file .md">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M3 13h10"/></svg>
+      </button>
+      <button class="icon-btn" id="delete" title="Xóa cuộc họp" aria-label="Xóa cuộc họp">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.2 4.5V3h3.6v1.5M4.6 4.5l.6 8.5h5.6l.6-8.5"/></svg>
+      </button>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <section class="empty" id="empty">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="19" y="6" width="10" height="22" rx="5"/><path d="M12 22a12 12 0 0 0 24 0M24 34v8M17 42h14"/></svg>
+        <p id="empty-text">Chọn một cuộc họp ở bên trái</p>
+        <button class="primary-btn" id="empty-new" hidden>Tải file ghi âm lên</button>
+      </section>
+
+      <article class="meeting" id="meeting" hidden>
+        <input class="title" id="title" aria-label="Tiêu đề cuộc họp" spellcheck="false">
+        <div class="meta">
+          <span class="date-wrap">
+            <button type="button" class="date" id="date-btn" title="Đổi ngày họp"></button>
+            <input type="date" id="date" tabindex="-1" aria-label="Ngày họp">
+          </span>
+          <span id="meta"></span>
+        </div>
+
+        <div class="status" id="status" hidden>
+          <div class="status-text" id="status-text"></div>
+          <div class="progress"><div id="progress"></div></div>
+        </div>
+
+        <div class="player" id="player" hidden>
+          <input type="range" class="scrub" id="scrub" min="0" max="1000" value="0" aria-label="Vị trí phát">
+          <div class="times"><span id="t-now">0:00</span><span id="t-left">-0:00</span></div>
+          <div class="controls">
+            <button class="speed" id="speed" title="Tốc độ phát">1×</button>
+            <button class="ctl" id="back15" title="Lùi 15 giây" aria-label="Lùi 15 giây">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v3.2h3.2"/><text x="12" y="15.2">15</text></svg>
+            </button>
+            <button class="play" id="play" aria-label="Phát">
+              <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6l7.6-4.8z"/></svg>
+              <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="2.8" height="10" rx="1"/><rect x="9.2" y="3" width="2.8" height="10" rx="1"/></svg>
+            </button>
+            <button class="ctl" id="fwd15" title="Tới 15 giây" aria-label="Tới 15 giây">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3.2h-3.2"/><text x="12" y="15.2">15</text></svg>
+            </button>
+            <span class="speed-spacer"></span>
+          </div>
+          <audio id="audio" preload="metadata"></audio>
+        </div>
+
+        <div class="transcript" id="transcript"></div>
+      </article>
+    </div>
+  </main>
+</div>
+
+<div class="drop-overlay" id="drop-overlay" hidden><div>Thả file để tải lên</div></div>
+
+<dialog class="sheet" id="sheet">
+  <form method="dialog" id="upload-form">
+    <h2>Tải file ghi âm lên</h2>
+    <label class="file-pick" id="file-pick">
       <input type="file" id="file" accept="audio/*,video/*" hidden>
-      <div id="drop-text">Kéo thả file ghi âm vào đây hoặc <a href="#" id="pick">chọn file</a></div>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+      <span id="file-name">Chọn file hoặc kéo thả vào đây</span>
+    </label>
+    <label class="field">Tiêu đề<input type="text" id="f-title" placeholder="Mặc định: tên file"></label>
+    <label class="field">Ngày họp<input type="date" id="f-date"></label>
+    <label class="field">Từ khóa, thuật ngữ
+      <input type="text" id="f-keywords" placeholder="VD: Odoo, Catalog AI, gói thầu, RAG">
+      <small>Giúp Whisper nghe đúng tên riêng và thuật ngữ.</small>
+    </label>
+    <div class="progress" id="upload-progress" hidden><div></div></div>
+    <p class="sheet-msg" id="upload-msg"></p>
+    <div class="sheet-actions">
+      <button type="button" class="secondary-btn" id="cancel">Hủy</button>
+      <button type="submit" class="primary-btn" id="submit" disabled>Tải lên</button>
     </div>
-    <div class="row">
-      <label>Tiêu đề <input type="text" id="title" placeholder="Mặc định: tên file"></label>
-      <label style="flex:0 0 160px">Ngày họp <input type="date" id="date"></label>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <label>Từ khóa / thuật ngữ (giúp nhận đúng tên riêng)
-        <input type="text" id="keywords" placeholder="VD: Odoo, Catalog AI, gói thầu, RAG"></label>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <button class="primary" id="submit" type="submit" disabled>Tải lên &amp; xử lý</button>
-    </div>
-    <div class="bar" id="upload-bar" hidden><div></div></div>
-    <div class="msg" id="upload-msg"></div>
   </form>
+</dialog>
 
-  <div class="card">
-    <table>
-      <thead><tr><th>Cuộc họp</th><th>Ngày</th><th class="hide-sm">Thời lượng</th><th>Trạng thái</th></tr></thead>
-      <tbody id="meetings"><tr><td colspan="4" class="muted">Đang tải…</td></tr></tbody>
-    </table>
-  </div>
-</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

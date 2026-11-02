@@ -5,7 +5,8 @@ from app.storage import Meeting
 
 def to_utterances(segments: list[dict]) -> list[dict]:
     out = [{"start": s["start"], "end": s["end"], "text": s["text"].strip()} for s in segments]
-    return [u for u in out if u["text"]]
+    # Whisper can emit out-of-order timestamps on noisy audio.
+    return sorted((u for u in out if u["text"]), key=lambda u: u["start"])
 
 
 def group_paragraphs(utterances: list[dict], max_gap: float, max_len: float) -> list[dict]:

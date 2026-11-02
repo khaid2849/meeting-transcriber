@@ -134,3 +134,11 @@ def test_rejects_foreign_host_header(client):
 
 def test_allows_localhost_host_header(client):
     assert client.get("/api/meetings", headers={"Host": "localhost:8765"}).status_code == 200
+
+
+def test_meeting_url_serves_the_same_app_shell(client, done_meeting):
+    assert client.get(f"/m/{done_meeting}").text == client.get("/").text
+
+
+def test_meeting_url_unknown_id_404(client):
+    assert client.get("/m/2026-01-01-khong-co").status_code == 404

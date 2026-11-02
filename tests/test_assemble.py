@@ -58,3 +58,8 @@ def test_render_markdown():
 def test_render_without_duration():
     md = render_markdown(meeting(duration=None), [utt(5, 8, "Xin chào")])
     assert md.splitlines()[1] == "Ngày: 2026-11-02"
+
+
+def test_to_utterances_sorts_by_start():
+    out = to_utterances([seg(27, 28, "b"), seg(24, 25, "a"), seg(30, 31, "c")])
+    assert [u["text"] for u in out] == ["a", "b", "c"]
