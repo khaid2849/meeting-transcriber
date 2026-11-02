@@ -204,3 +204,83 @@ def test_openai_compatible_provider_via_api(client, monkeypatch):
                      ("openai_compat", "", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")]
     bad = client.post("/api/ai/providers", json={"name": "X", "provider": "openai_compat", "api_key": "", "model": "m"})
     assert bad.status_code == 422
+
+
+def test_close_on_exit_closes_sync_generator_when_consumer_stops():
+    import anyio
+    from app.ai.routes import close_on_exit
+    events = []
+
+    def gen():
+        try:
+            yield "a"
+            yield "b"
+        finally:
+            events.append("closed")
+
+    async def consume():
+        agen = close_on_exit(gen())
+        assert await agen.__anext__() == "a"
+        await agen.aclose()  # what Starlette does when the client disconnects
+        events.append("after")
+
+    anyio.run(consume)
+    assert events == ["closed", "after"]
+
+
+def test_second_send_while_streaming_is_rejected(client, stores, monkeypatch):
+    _, _, _, done_id, _ = stores
+    add_provider(client)
+    chat_id = client.post("/api/chats", json={"meeting_ids": [done_id]}).json()["id"]
+    statuses = []
+
+    def fake_stream(cfg, system, history):
+        yield "một"
+        statuses.append(client.post(f"/api/chats/{chat_id}/messages", json={"content": "Câu khác"}).status_code)
+        yield " hai"
+
+    monkeypatch.setattr(routes, "stream_reply", fake_stream)
+    r = client.post(f"/api/chats/{chat_id}/messages", json={"content": "Câu đầu"})
+    assert statuses == [409] and ndjson(r)[-1] == {"done": True}
+    # the guard is released afterwards
+    monkeypatch.setattr(routes, "stream_reply", lambda c, s, h: iter(["ok"]))
+    assert client.post(f"/api/chats/{chat_id}/messages", json={"content": "Câu ba"}).status_code == 200
+
+
+def test_empty_answer_is_reported_as_error(client, stores, monkeypatch):
+    _, _, chats, done_id, _ = stores
+    add_provider(client)
+    monkeypatch.setattr(routes, "stream_reply", lambda c, s, h: iter([]))
+    chat_id = client.post("/api/chats", json={"meeting_ids": [done_id]}).json()["id"]
+    lines = ndjson(client.post(f"/api/chats/{chat_id}/messages", json={"content": "Hỏi"}))
+    assert "error" in lines[-1]
+    assert chats.get(chat_id)["messages"][-1]["error"]
+
+
+def test_chat_deleted_mid_stream_does_not_crash_or_resurrect(client, stores, monkeypatch):
+    _, _, chats, done_id, _ = stores
+    add_provider(client)
+    chat_id = client.post("/api/chats", json={"meeting_ids": [done_id]}).json()["id"]
+
+    def fake_stream(cfg, system, history):
+        yield "một"
+        chats.delete(chat_id)
+        yield " hai"
+
+    monkeypatch.setattr(routes, "stream_reply", fake_stream)
+    r = client.post(f"/api/chats/{chat_id}/messages", json={"content": "Hỏi"})
+    assert r.status_code == 200 and ndjson(r)[-1] == {"error": "Cuộc trò chuyện đã bị xóa"}
+    assert client.get(f"/api/chats/{chat_id}").status_code == 404
+
+
+def test_cross_site_writes_are_blocked(client):
+    assert client.post("/api/chats", json={"meeting_ids": []}, headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.post("/api/chats", json={"meeting_ids": []}, headers={"Origin": "https://evil.example"}).status_code == 403
+    assert client.post("/api/chats", json={"meeting_ids": []}, headers={"Sec-Fetch-Site": "same-origin"}).status_code == 201
+    assert client.post("/api/chats", json={"meeting_ids": []}, headers={"Origin": "http://testserver"}).status_code == 201
+    assert client.get("/api/chats", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+
+
+def test_chats_tab_url_serves_shell(client):
+    assert client.get("/c").text == client.get("/").text
+

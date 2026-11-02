@@ -68,8 +68,9 @@ class ChatStore:
             return chat
 
     def delete(self, chat_id: str) -> None:
-        self.get(chat_id)
-        self._path(chat_id).unlink()
+        with self.lock:  # an append in flight must not recreate the file afterwards
+            self.get(chat_id)
+            self._path(chat_id).unlink()
 
     def list(self) -> list[dict]:
         out = []

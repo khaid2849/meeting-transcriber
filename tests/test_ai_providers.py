@@ -42,7 +42,8 @@ def test_gemini_contents_map_assistant_to_model():
 
 def test_keep_chat_models_filters_non_chat_ids():
     ids = ["gpt-5.1", "text-embedding-3-large", "gpt-4o-audio-preview", "o3", "dall-e-3",
-           "gpt-image-1", "whisper-1", "tts-1", "gpt-4o-realtime", "chatgpt-4o-latest", "o4-mini"]
+           "gpt-image-1", "whisper-1", "tts-1", "gpt-4o-realtime", "chatgpt-4o-latest", "o4-mini",
+           "gpt-5-pro", "gpt-5-codex", "o3-pro"]
     assert keep_chat_models("openai", ids) == ["chatgpt-4o-latest", "gpt-5.1", "o3", "o4-mini"]
     assert keep_chat_models("gemini", ["gemini-3-pro", "embedding-001", "imagen-4"]) == ["gemini-3-pro"]
     assert keep_chat_models("anthropic", ["claude-opus-5-5", "claude-haiku-5-5"]) == ["claude-haiku-5-5", "claude-opus-5-5"]

@@ -389,3 +389,4 @@ svg { display: block; }
 
 .compat-fields { display: flex; flex-direction: column; gap: 10px; }
 .notice.warn { background: color-mix(in srgb, #ff9f0a 16%, transparent); }
+.md a { color: var(--accent); }

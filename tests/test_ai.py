@@ -170,3 +170,10 @@ def test_builtin_providers_ignore_base_url(tmp_path):
     s = AISettings(tmp_path / "ai.json")
     p = s.add(name="GPT", provider="openai", api_key="sk-x-1234", model="gpt-5", base_url="http://evil/v1")
     assert s.get(p["id"])["base_url"] is None
+
+
+@pytest.mark.parametrize("key", ["sk-abc def-1234", "sk-abc\x07-1234", "sk-khóa-1234"])
+def test_rejects_keys_that_are_not_printable_ascii(tmp_path, key):
+    with pytest.raises(ValueError) as exc:
+        AISettings(tmp_path / "ai.json").add(name="X", provider="openai", api_key=key, model="m")
+    assert key not in str(exc.value)

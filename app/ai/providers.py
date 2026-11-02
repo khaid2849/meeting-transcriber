@@ -8,7 +8,8 @@ MAX_OUTPUT = 64000
 
 OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 OPENAI_EXCLUDE = ("audio", "realtime", "tts", "transcribe", "image", "embedding", "search",
-                  "instruct", "moderation", "dall-e", "whisper")
+                  "instruct", "moderation", "dall-e", "whisper",
+                  "codex", "-pro")  # Responses-API-only models fail on Chat Completions
 
 
 class ProviderError(Exception):
@@ -83,14 +84,19 @@ def friendly_error(exc: Exception) -> str:
 
 # ---------- Claude ----------
 
+_MAX_TOKENS: dict[tuple[int, str], int] = {}  # per (key, model): output cap from the Models API
+
 def _anthropic_stream(cfg: dict, system: str, history: list[dict]) -> Iterator[str]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=cfg["api_key"])
-    try:
-        max_tokens = min(MAX_OUTPUT, client.models.retrieve(cfg["model"]).max_tokens or MAX_OUTPUT)
-    except anthropic.APIStatusError as exc:
-        raise ProviderError(friendly_error(exc)) from exc
+    cache_key = (hash(cfg["api_key"]), cfg["model"])
+    if cache_key not in _MAX_TOKENS:
+        try:
+            _MAX_TOKENS[cache_key] = min(MAX_OUTPUT, client.models.retrieve(cfg["model"]).max_tokens or MAX_OUTPUT)
+        except anthropic.APIStatusError as exc:
+            raise ProviderError(friendly_error(exc)) from exc
+    max_tokens = _MAX_TOKENS[cache_key]
     req = anthropic_request(cfg["model"], system, history, max_tokens)
     api = client.beta.messages if "betas" in req else client.messages
     with api.stream(**req) as stream:

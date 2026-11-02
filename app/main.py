@@ -5,9 +5,10 @@ import re
 from contextlib import asynccontextmanager
 from datetime import date as Date
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
@@ -50,6 +51,17 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     app = FastAPI(title="Meeting Transcriber", lifespan=lifespan)
     # Blocks DNS-rebinding pages from reading transcripts through the browser.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
+    hosts = set(allowed_hosts)
+
+    @app.middleware("http")
+    async def block_cross_site_writes(request, call_next):
+        # Another website open in the same browser must not upload files or spend AI credit here.
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if request.headers.get("sec-fetch-site") == "cross-site" or (
+                    origin and urlparse(origin).hostname not in hosts):
+                return JSONResponse({"detail": "Yêu cầu từ trang web khác bị chặn"}, status_code=403)
+        return await call_next(request)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     if ai_settings is not None and chats is not None:
         app.include_router(ai_router(store, ai_settings, chats))

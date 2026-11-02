@@ -1,10 +1,13 @@
 """HTTP API for AI provider settings and transcript chats."""
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Literal
 
+import anyio
 from fastapi import APIRouter, HTTPException
+from starlette.concurrency import iterate_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -66,8 +69,27 @@ def _line(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False) + "\n"
 
 
+async def close_on_exit(gen):
+    """Stream a sync generator and close it as soon as the client goes away.
+
+    Starlette abandons a sync iterator on disconnect without closing it, which would keep the
+    provider request (and its billing) running and delay saving the partial answer.
+    """
+    try:
+        async for item in iterate_in_threadpool(gen):
+            yield item
+    finally:
+        with anyio.CancelScope(shield=True):
+            try:
+                await anyio.to_thread.run_sync(gen.close)
+            except ValueError:  # generator still executing in its thread
+                log.warning("could not close an answer stream")
+
+
 def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) -> APIRouter:
     router = APIRouter()
+    streaming: set[str] = set()  # chats with an answer in flight
+    streaming_lock = threading.Lock()
 
     def public_provider(entry: dict) -> dict:
         return next(p for p in settings.public()["providers"] if p["id"] == entry["id"])
@@ -158,6 +180,10 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
 
     # ---------- chats ----------
 
+    @router.get("/c", include_in_schema=False)
+    def chats_page():
+        return FileResponse(INDEX)
+
     @router.get("/c/{chat_id}", include_in_schema=False)
     def chat_page(chat_id: str):
         get_chat(chat_id)
@@ -207,33 +233,60 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         if not cfg:
             raise HTTPException(400, "Chưa cấu hình AI. Mở Cài đặt AI để thêm API key.")
 
+        busy = "Đang có câu trả lời chạy trong cuộc trò chuyện này"
+        if chat_id in streaming:
+            raise HTTPException(409, busy)
         _, usable = scope(chat["meeting_ids"])
         system, labels = build_system_prompt(usable)
         history = chat_history(chat["messages"]) + [{"role": "user", "content": question}]
-        chats.append(chat_id, {"role": "user", "content": question})
         # Labels are saved per answer so citations keep pointing at the right meeting after scope edits.
         meta = {"provider": cfg["name"], "model": cfg["model"], "labels": labels}
 
+        def save(error: str | None = None) -> bool:
+            message = {"role": "assistant", "content": "".join(parts), **meta}
+            if error:
+                message["error"] = error
+            try:
+                chats.append(chat_id, message)
+                return True
+            except KeyError:  # chat deleted while the answer was streaming
+                return False
+
+        parts: list[str] = []
+
         def generate():
-            parts: list[str] = []
+            # The guard is taken here, not in the endpoint: a stream that never starts holds nothing.
+            with streaming_lock:
+                taken = chat_id in streaming
+                if not taken:
+                    streaming.add(chat_id)
+            if taken:
+                yield _line({"error": busy})
+                return
             saved = False
             try:
+                try:
+                    chats.append(chat_id, {"role": "user", "content": question})
+                except KeyError:
+                    saved = True
+                    yield _line({"error": "Cuộc trò chuyện đã bị xóa"})
+                    return
                 for delta in stream_reply(cfg, system, history):
                     parts.append(delta)
                     yield _line({"delta": delta})
-                chats.append(chat_id, {"role": "assistant", "content": "".join(parts), **meta})
+                if not "".join(parts).strip():
+                    raise ProviderError("Nhà cung cấp không trả về nội dung (có thể bị bộ lọc an toàn chặn).")
                 saved = True
-                yield _line({"done": True})
+                yield _line({"done": True} if save() else {"error": "Cuộc trò chuyện đã bị xóa"})
             except ProviderError as exc:
-                chats.append(chat_id, {"role": "assistant", "content": "".join(parts), "error": str(exc), **meta})
                 saved = True
-                yield _line({"error": str(exc)})
+                yield _line({"error": str(exc)} if save(str(exc)) else {"error": "Cuộc trò chuyện đã bị xóa"})
             finally:
                 if not saved:  # client went away mid-answer: keep what arrived
-                    chats.append(chat_id, {"role": "assistant", "content": "".join(parts),
-                                           "error": "Đã dừng giữa chừng", **meta})
+                    save("Đã dừng giữa chừng")
+                streaming.discard(chat_id)
 
-        return StreamingResponse(generate(), media_type="application/x-ndjson",
+        return StreamingResponse(close_on_exit(generate()), media_type="application/x-ndjson",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     return router

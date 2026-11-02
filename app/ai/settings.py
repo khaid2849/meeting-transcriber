@@ -1,5 +1,6 @@
 """AI provider configurations, stored on this machine only (file mode 600)."""
 import json
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -113,6 +114,9 @@ def _validate(entry: dict) -> None:
             raise ValueError("Base URL phải bắt đầu bằng http:// hoặc https://")
     else:
         required.append(("api_key", "API key"))
+    if entry["api_key"] and not re.fullmatch(r"[\x21-\x7e]+", entry["api_key"]):
+        # Never echo the key: a malformed one ends up in HTTP-library error messages.
+        raise ValueError("API key chứa khoảng trắng hoặc ký tự không hợp lệ")
     for field, label in required:
         if not entry[field]:
             raise ValueError(f"{label} không được trống")

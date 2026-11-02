@@ -27,6 +27,7 @@ const state = {
   chat: null, // full chat detail of the open conversation
   providers: { providers: [], default_id: null },
   streaming: null, // AbortController while an answer streams
+  inflight: null, // {chatId, answer} for the answer being streamed
 };
 
 /* ---------- helpers ---------- */
@@ -207,6 +208,7 @@ async function loadMeeting(id) {
   try {
     data = await api(`/api/meetings/${id}`);
   } catch (err) {
+    state.pendingSeek = null;
     if (id === state.selected) select(null);
     toast(err.message);
     return;
@@ -340,7 +342,9 @@ async function patch(changes) {
   }
 }
 
-$("title").onkeydown = (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.target.value = state.meeting.title; e.target.blur(); } };
+const imeEnter = (e) => e.isComposing || e.keyCode === 229; // Safari commits Telex/VNI words with Enter
+
+$("title").onkeydown = (e) => { if (imeEnter(e)) return; if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.target.value = state.meeting.title; e.target.blur(); } };
 $("title").onchange = async () => {
   if (!(await patch({ title: $("title").value }))) $("title").value = state.meeting.title;
   else document.title = state.meeting.title;
@@ -543,8 +547,24 @@ function showPane(kind) {
   $("chat-pane").hidden = kind !== "chat";
 }
 
-$("tab-meetings").onclick = () => { if (state.tab !== "meetings") select(state.selected); };
-$("tab-chats").onclick = () => { if (state.tab !== "chats") selectChat(state.chat?.id || null); };
+function reveal(tab, url, open) {
+  history.pushState({}, "", url);
+  setTab(tab);
+  showPane(tab === "chats" ? "chat" : "meeting");
+  $("window").classList.toggle("show-detail", open);
+  if (tab === "chats") renderChatList(); else renderList();
+}
+
+$("tab-meetings").onclick = () => {
+  if (state.tab === "meetings") return;
+  if (state.meeting) reveal("meetings", `/m/${state.meeting.id}`, true);
+  else select(null);
+};
+$("tab-chats").onclick = () => {
+  if (state.tab === "chats") return;
+  if (state.chat) reveal("chats", `/c/${state.chat.id}`, true);
+  else selectChat(null);
+};
 
 /* ---------- chats list ---------- */
 
@@ -590,7 +610,7 @@ function renderChatList() {
 /* ---------- chat pane ---------- */
 
 async function selectChat(id, push = true) {
-  if (push && (id !== state.chat?.id || state.tab !== "chats")) history.pushState({}, "", id ? `/c/${id}` : "/");
+  if (push && (id !== state.chat?.id || state.tab !== "chats")) history.pushState({}, "", id ? `/c/${id}` : "/c");
   if (state.streaming && state.chat?.id !== id) state.streaming.abort();
   setTab("chats");
   showPane("chat");
@@ -612,12 +632,16 @@ async function selectChat(id, push = true) {
 
 async function reloadChat() {
   if (!state.chat) return;
+  let chat;
   try {
-    state.chat = await api(`/api/chats/${state.chat.id}`);
+    chat = await api(`/api/chats/${state.chat.id}`);
   } catch (err) {
     toast(err.message);
     return;
   }
+  // The server has saved the question but not yet the answer that is still streaming.
+  if (state.inflight?.chatId === chat.id) chat.messages.push(state.inflight.answer);
+  state.chat = chat;
   renderChat();
 }
 
@@ -722,7 +746,7 @@ function messageNode(m) {
   if (m.role === "user") return el("div", { className: "msg-user", textContent: m.content });
   const node = el("div", { className: "msg-ai" });
   const md = el("div", { className: `md${m.streaming ? " typing" : ""}` });
-  md.innerHTML = renderMarkdown(m.content, m.labels || state.chat.labels);
+  md.append(renderMarkdown(m.content, m.labels || state.chat.labels));
   node.append(md);
   if (m.error) node.append(el("div", { className: "msg-error", textContent: `⚠ ${m.error}` }));
   if (!m.streaming && m.content) {
@@ -733,6 +757,9 @@ function messageNode(m) {
   return node;
 }
 
+// LLM output is untrusted (a transcript can carry a prompt injection): text formatting only, no images or forms.
+const MD_TAGS = ["p", "br", "strong", "em", "b", "i", "s", "del", "code", "pre", "blockquote", "ul", "ol", "li",
+  "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td", "a", "hr"];
 const CITE = /\[(M\d+)\s+((?:\d{1,2}:)?\d{1,2}:\d{2}(?:\s*[,;–-]\s*(?:\d{1,2}:)?\d{1,2}:\d{2})*)\]/g;
 
 function toSeconds(ts) {
@@ -746,10 +773,11 @@ function renderMarkdown(text, labels) {
     const secs = toSeconds(times.split(/[,;–-]/)[0].trim());
     return `[${label} ${times}](/m/${encodeURIComponent(id)}?t=${secs})`;
   });
-  const html = DOMPurify.sanitize(marked.parse(linked, { gfm: true, breaks: true }));
-  const tpl = document.createElement("template");
-  tpl.innerHTML = html;
-  for (const a of tpl.content.querySelectorAll("a[href]")) {
+  const frag = DOMPurify.sanitize(marked.parse(linked, { gfm: true, breaks: true }), {
+    ALLOWED_TAGS: MD_TAGS, ALLOWED_ATTR: ["href", "title"], ALLOWED_URI_REGEXP: /^(?:https?:\/\/|\/m\/)/i,
+    RETURN_DOM_FRAGMENT: true,
+  });
+  for (const a of frag.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href");
     if (href.startsWith("/m/")) {
       a.className = "cite";
@@ -760,7 +788,7 @@ function renderMarkdown(text, labels) {
       a.rel = "noopener noreferrer";
     }
   }
-  return tpl.innerHTML;
+  return frag;
 }
 
 $("messages").addEventListener("click", (e) => {
@@ -800,8 +828,8 @@ function autosize() {
 
 $("prompt").addEventListener("input", () => { autosize(); updateComposer(); });
 $("prompt").addEventListener("keydown", (e) => {
-  // isComposing: Vietnamese input methods (Telex/VNI) use Enter to commit a word.
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+  if (imeEnter(e)) return;
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     if (!$("send").disabled && !state.streaming) send($("prompt").value);
   }
@@ -842,6 +870,7 @@ async function send(text) {
 
   const ctrl = new AbortController();
   state.streaming = ctrl;
+  state.inflight = { chatId: chat.id, answer };
   updateComposer();
   let failedEarly = false;
   try {
@@ -876,6 +905,7 @@ async function send(text) {
   } finally {
     answer.streaming = false;
     state.streaming = null;
+    state.inflight = null;
     if (state.chat?.id === chat.id) {
       if (failedEarly) {
         chat.messages.splice(-2, 2);
@@ -909,6 +939,7 @@ async function patchChat(changes) {
 function updateScope(meetingIds) { return patchChat({ meeting_ids: meetingIds }); }
 
 $("chat-title").onkeydown = (e) => {
+  if (imeEnter(e)) return;
   if (e.key === "Enter") e.target.blur();
   if (e.key === "Escape") { e.target.value = state.chat.title; e.target.blur(); }
 };
@@ -993,7 +1024,11 @@ function renderProviderList() {
     } else {
       const def = el("button", { className: "link", type: "button", textContent: "Đặt mặc định" });
       def.onclick = async () => {
-        state.providers = await api("/api/ai/default", { method: "POST", ...jsonBody({ id: p.id }) });
+        try {
+          state.providers = await api("/api/ai/default", { method: "POST", ...jsonBody({ id: p.id }) });
+        } catch (err) {
+          alert(err.message);
+        }
         renderProviderList();
       };
       actions.push(def);
@@ -1003,7 +1038,11 @@ function renderProviderList() {
     const del = el("button", { className: "link danger", type: "button", textContent: "Xóa" });
     del.onclick = async () => {
       if (!confirm(`Xóa cấu hình "${p.name}"?`)) return;
-      await api(`/api/ai/providers/${p.id}`, { method: "DELETE" });
+      try {
+        await api(`/api/ai/providers/${p.id}`, { method: "DELETE" });
+      } catch (err) {
+        alert(err.message);
+      }
       await loadProviders();
       renderProviderList();
     };
@@ -1106,12 +1145,14 @@ $("provider-form").onsubmit = async (e) => {
   toast("Đã lưu cấu hình AI");
 };
 $("open-settings").onclick = openSettings;
+$("pf-add").onclick = () => openProviderForm(null);
 $("settings-close").onclick = () => $("settings").close();
 $("settings").addEventListener("close", () => { if (state.chat) renderChat(); });
 
 /* ---------- start ---------- */
 
 function route(push) {
+  if (location.pathname === "/c") return selectChat(null, push);
   const m = location.pathname.match(/^\/(m|c)\/([^/]+)$/);
   const seek = Number(new URLSearchParams(location.search).get("t"));
   if (m && m[1] === "m" && Number.isFinite(seek) && seek > 0) state.pendingSeek = seek;
