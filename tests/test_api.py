@@ -165,3 +165,40 @@ def test_favicon_and_manifest_served(client):
     assert m.status_code == 200 and m.json()["name"] == "Bản ghi cuộc họp"
     assert client.get("/static/icon.svg").status_code == 200
     assert client.get("/static/apple-touch-icon.png").status_code == 200
+
+
+INFO = {"title": "Họp quý 3", "date": "2026-10-28", "duration": 3725, "url": "https://www.youtube.com/watch?v=abc123"}
+
+
+def test_youtube_link_creates_meeting_from_video_metadata(client, store, worker, monkeypatch):
+    from app import youtube
+    monkeypatch.setattr(youtube, "fetch_info", lambda url: dict(INFO))
+    r = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123", "keywords": "Odoo"})
+    assert r.status_code == 201, r.text
+    m = r.json()
+    assert (m["title"], m["date"], m["duration"], m["keywords"]) == ("Họp quý 3", "2026-10-28", 3725, "Odoo")
+    assert m["source_url"] == "https://www.youtube.com/watch?v=abc123" and m["original_name"] == "YouTube"
+    assert worker.calls == [m["id"]]
+
+
+def test_youtube_link_user_title_and_date_win(client, monkeypatch):
+    from app import youtube
+    monkeypatch.setattr(youtube, "fetch_info", lambda url: dict(INFO))
+    m = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123", "title": "Tên riêng",
+                                                   "date": "2026-11-01"}).json()
+    assert (m["title"], m["date"]) == ("Tên riêng", "2026-11-01")
+
+
+def test_youtube_link_rejects_non_youtube(client):
+    assert client.post("/api/meetings/youtube", json={"url": "https://vimeo.com/1"}).status_code == 422
+
+
+def test_youtube_link_reports_unavailable_video(client, monkeypatch):
+    from app import youtube
+
+    def private(url):
+        raise youtube.YouTubeError("Video đang ở chế độ riêng tư nên app không tải được.")
+
+    monkeypatch.setattr(youtube, "fetch_info", private)
+    r = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123"})
+    assert r.status_code == 400 and "riêng tư" in r.json()["detail"]

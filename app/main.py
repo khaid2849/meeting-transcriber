@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
-from app import config
+from app import config, youtube
 from app.ai.chats import ChatStore
 from app.ai.routes import ai_router
 from app.ai.settings import AISettings
@@ -22,6 +22,13 @@ from app.storage import Meeting, MeetingStore
 from app.worker import ACTIVE, RealEngine, Worker, update_meeting
 
 STATIC = Path(__file__).parent / "static"
+
+
+class YouTubeIn(BaseModel):
+    url: str
+    title: str = ""
+    date: str = ""
+    keywords: str = ""
 
 
 class MeetingPatch(BaseModel):
@@ -104,6 +111,21 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         except Exception:
             store.delete(meeting.id)
             raise
+        worker.enqueue(meeting.id)
+        return store.get(meeting.id).to_dict()
+
+    @app.post("/api/meetings/youtube", status_code=201)
+    def create_from_youtube(body: YouTubeIn) -> dict:
+        if not youtube.is_youtube_url(body.url):
+            raise HTTPException(422, "Chỉ nhận link một video YouTube (youtube.com/watch?v=… hoặc youtu.be/…)")
+        try:
+            info = youtube.fetch_info(body.url)
+        except youtube.YouTubeError as exc:
+            raise HTTPException(400, str(exc)) from None
+        date = _check_date(body.date) if body.date.strip() else (info["date"] or Date.today().isoformat())
+        meeting = store.create(title=body.title.strip() or info["title"], date=date, keywords=body.keywords.strip(),
+                               original_name="YouTube", source_url=info["url"] or body.url.strip(),
+                               duration=info["duration"])
         worker.enqueue(meeting.id)
         return store.get(meeting.id).to_dict()
 

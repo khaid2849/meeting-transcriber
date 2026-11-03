@@ -14,7 +14,7 @@ from app.storage import Meeting, MeetingStore, write_text_atomic
 
 log = logging.getLogger(__name__)
 # "diarizing" only appears in meeting.json files written before speaker separation was removed.
-ACTIVE = ("converting", "transcribing", "diarizing")
+ACTIVE = ("downloading", "converting", "transcribing", "diarizing")
 
 
 class Engine(Protocol):
@@ -23,6 +23,7 @@ class Engine(Protocol):
     def load_samples(self, path: Path) -> np.ndarray: ...
     def transcribe(self, samples, model: str, keywords: str, on_progress) -> list[dict]: ...
     def release(self) -> None: ...
+    def download(self, url: str, folder: Path, on_progress) -> Path: ...
 
 
 class RealEngine:
@@ -45,6 +46,10 @@ class RealEngine:
     def release(self):
         from app.asr import release_model
         release_model()
+
+    def download(self, url, folder, on_progress):
+        from app.youtube import download_audio
+        return download_audio(url, folder, on_progress)
 
 
 def rebuild_transcript(store: MeetingStore, meeting_id: str) -> None:
@@ -127,12 +132,19 @@ class Worker:
         folder = self.store.dir(meeting_id)
         audio = folder / "audio.m4a"
         upload = next(folder.glob("upload.*"), None)
+        downloaded = False
+        if upload is None and not audio.exists():
+            source_url = self.store.get(meeting_id).source_url
+            if source_url:
+                on_progress = self._stage(meeting_id, "downloading")
+                upload = self.engine.download(source_url, folder, on_progress)
+                downloaded = True
         if upload is not None:
             self._stage(meeting_id, "converting")
             info = self.engine.probe(upload)
             self.engine.extract_audio(upload, audio)
             self.store.update(meeting_id, duration=info["duration"])
-            if info["has_video"]:
+            if info["has_video"] or downloaded:  # the link stays in meeting.json; audio.m4a is enough
                 upload.unlink()
             else:
                 upload.rename(folder / f"original{upload.suffix}")

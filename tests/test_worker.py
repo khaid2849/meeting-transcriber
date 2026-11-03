@@ -247,3 +247,53 @@ def test_releases_model_after_failed_job(store):
     new_meeting(store)
     calls = run_in_thread(store, FakeEngine(), 1, fail_first=True)
     assert calls == ["release"]
+
+
+class YouTubeEngine(FakeEngine):
+    def __init__(self, download_error=None, **kw):
+        super().__init__(**kw)
+        self.download_error = download_error
+
+    def download(self, url, folder, on_progress):
+        self.calls.append(("download", url))
+        if self.download_error:
+            raise self.download_error
+        on_progress(0.5)
+        path = folder / "upload.webm"
+        path.write_bytes(b"opus")
+        return path
+
+
+def youtube_meeting(store):
+    return store.create(title="Video", date="2026-11-03", keywords="", original_name="YouTube",
+                        source_url="https://www.youtube.com/watch?v=abc123")
+
+
+def test_youtube_job_downloads_then_transcribes(store):
+    m = youtube_meeting(store)
+    seen = []
+    orig = store.save
+    store.save = lambda meeting: (seen.append(meeting.status), orig(meeting))
+    engine = YouTubeEngine()
+    w = Worker(store, engine, "m")
+    w.progress_interval = 0
+    w.run_job(m.id)
+    assert ("download", "https://www.youtube.com/watch?v=abc123") in engine.calls
+    assert "downloading" in seen and store.get(m.id).status == "done"
+    names = files(store, m)
+    assert "transcript.md" in names and not any(n.startswith(("upload.", "original.")) for n in names)
+
+
+def test_youtube_download_error_is_shown(store):
+    from app.youtube import YouTubeError
+    m = youtube_meeting(store)
+    Worker(store, YouTubeEngine(download_error=YouTubeError("Video đang ở chế độ riêng tư")), "m").run_job(m.id)
+    got = store.get(m.id)
+    assert got.status == "error" and "riêng tư" in got.error
+
+
+def test_recover_marks_interrupted_download(store):
+    m = youtube_meeting(store)
+    store.update(m.id, status="downloading")
+    Worker(store, YouTubeEngine(), "m").recover()
+    assert store.get(m.id).status == "error"

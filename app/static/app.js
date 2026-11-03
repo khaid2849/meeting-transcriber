@@ -2,13 +2,16 @@
 
 const STATUS = {
   queued: "Đang chờ xử lý",
+  downloading: "Đang tải từ YouTube",
   converting: "Đang chuyển định dạng",
   transcribing: "Đang chuyển thành văn bản",
   done: "Xong",
   error: "Lỗi",
 };
-const ACTIVE = ["queued", "converting", "transcribing"];
-const RUNNING = ["converting", "transcribing"];
+const ACTIVE = ["queued", "downloading", "converting", "transcribing"];
+const RUNNING = ["downloading", "converting", "transcribing"];
+// Same rule as app/youtube.py: a single video, not a channel or playlist.
+const YT_RE = /^https?:\/\/(?:(?:www\.|m\.|music\.)?youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|shorts\/|embed\/)|youtu\.be\/)[\w-]{6,}/i;
 const SPEEDS = [1, 1.25, 1.5, 2];
 const POLL_MS = 2000;
 
@@ -175,7 +178,9 @@ function showEmpty() {
   $("meeting").hidden = true;
   $("empty").hidden = false;
   const none = !state.meetings.length;
-  $("empty-text").textContent = none ? "Chưa có cuộc họp nào. Kéo thả file ghi âm vào cửa sổ để bắt đầu." : "Chọn một cuộc họp ở bên trái";
+  $("empty-text").textContent = none
+    ? "Chưa có cuộc họp nào. Kéo thả file ghi âm / video, hoặc dán link YouTube để bắt đầu."
+    : "Chọn một cuộc họp ở bên trái";
   $("empty-new").hidden = !none;
   for (const id of ["copy", "download", "delete"]) $(id).disabled = true;
   $("retry").hidden = true;
@@ -228,6 +233,8 @@ function renderMeeting(m, paragraphs) {
   $("date-btn").textContent = longDate(m.date);
   $("meta").textContent = [longDuration(m.duration), m.model && m.model.split("/").pop().replace(/-mlx$/, "")]
     .filter(Boolean).join(" · ");
+  $("source-link").hidden = !m.source_url;
+  if (m.source_url) $("source-link").href = m.source_url;
 
   const done = m.status === "done";
   const active = ACTIVE.includes(m.status);
@@ -400,6 +407,33 @@ window.onpopstate = () => route(false);
 
 let pendingFile = null;
 let xhr = null;
+let source = "file"; // "file" | "youtube"
+let ytBusy = false;
+
+function updateSubmit() {
+  $("submit").disabled = ytBusy || !!xhr || (source === "file" ? !pendingFile : !YT_RE.test($("f-url").value.trim()));
+}
+
+function setSource(kind) {
+  source = kind;
+  const yt = kind === "youtube";
+  $("src-file").classList.toggle("on", !yt);
+  $("src-yt").classList.toggle("on", yt);
+  $("file-pick").hidden = yt;
+  $("yt-field").hidden = !yt;
+  $("date-hint").hidden = !yt;
+  $("f-title").placeholder = yt ? "Để trống: lấy tên video" : "Mặc định: tên file";
+  $("submit").textContent = yt ? "Lấy video" : "Tải lên";
+  // A YouTube video defaults to its upload date; a file to today.
+  if (yt && $("f-date").value === todayIso()) $("f-date").value = "";
+  if (!yt && !$("f-date").value) $("f-date").value = todayIso();
+  updateSubmit();
+  (yt ? $("f-url") : $("f-title")).focus();
+}
+
+$("src-file").onclick = () => setSource("file");
+$("src-yt").onclick = () => setSource("youtube");
+$("f-url").addEventListener("input", updateSubmit);
 
 function setFile(file) {
   if (!file) return;
@@ -407,11 +441,11 @@ function setFile(file) {
   $("file-name").textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
   $("file-pick").classList.add("has-file");
   if (!$("f-title").value) $("f-title").value = file.name.replace(/\.[^.]+$/, "");
-  $("submit").disabled = false;
+  updateSubmit();
 }
 
-function openSheet(file = null) {
-  if (xhr) return;
+function openSheet(file = null, url = null) {
+  if (xhr || ytBusy) return;
   pendingFile = null;
   $("upload-form").reset();
   $("f-date").value = todayIso();
@@ -422,7 +456,33 @@ function openSheet(file = null) {
   $("upload-msg").className = "sheet-msg";
   $("upload-progress").hidden = true;
   if (!$("sheet").open) $("sheet").showModal();
+  setSource(url ? "youtube" : "file");
+  if (url) { $("f-url").value = url; updateSubmit(); }
   setFile(file);
+}
+
+async function submitYoutube() {
+  const msg = $("upload-msg");
+  ytBusy = true;
+  updateSubmit();
+  msg.className = "sheet-msg";
+  msg.textContent = "Đang lấy thông tin video…";
+  try {
+    const m = await api("/api/meetings/youtube", {
+      method: "POST",
+      ...jsonBody({ url: $("f-url").value.trim(), title: $("f-title").value, date: $("f-date").value, keywords: $("f-keywords").value }),
+    });
+    ytBusy = false;
+    $("sheet").close();
+    toast("Đang tải âm thanh từ YouTube…");
+    await refresh();
+    select(m.id);
+  } catch (err) {
+    ytBusy = false;
+    msg.className = "sheet-msg error";
+    msg.textContent = `Lỗi: ${err.message}`;
+    updateSubmit();
+  }
 }
 
 $("new").onclick = () => (state.tab === "chats" ? openPicker(null) : openSheet());
@@ -432,10 +492,11 @@ $("cancel").onclick = () => {
   if (xhr) { xhr.abort(); return; }
   $("sheet").close();
 };
-$("sheet").addEventListener("cancel", (e) => { if (xhr) e.preventDefault(); });
+$("sheet").addEventListener("cancel", (e) => { if (xhr || ytBusy) e.preventDefault(); });
 
 $("upload-form").onsubmit = (e) => {
   e.preventDefault();
+  if (source === "youtube") { if (!ytBusy) submitYoutube(); return; }
   if (!pendingFile || xhr) return;
   const form = new FormData();
   form.append("file", pendingFile);
@@ -484,9 +545,9 @@ $("upload-form").onsubmit = (e) => {
   xhr.send(form);
 };
 
-// Drag a file anywhere onto the window.
+// Drag a file (or a YouTube link from another tab) anywhere onto the window.
 let dragDepth = 0;
-const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+const hasFiles = (e) => ["Files", "text/uri-list"].some((t) => [...(e.dataTransfer?.types || [])].includes(t));
 window.addEventListener("dragenter", (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
@@ -506,7 +567,23 @@ window.addEventListener("drop", (e) => {
   $("drop-overlay").hidden = true;
   $("file-pick").classList.remove("over");
   const file = e.dataTransfer.files[0];
-  if ($("sheet").open) setFile(file); else openSheet(file);
+  if (file) {
+    if ($("sheet").open) setFile(file); else openSheet(file);
+    return;
+  }
+  const url = (e.dataTransfer.getData("text/uri-list") || "").split("\n")[0].trim();
+  if (!YT_RE.test(url)) { toast("Chỉ nhận file ghi âm / video hoặc link YouTube"); return; }
+  if ($("sheet").open) { setSource("youtube"); $("f-url").value = url; updateSubmit(); } else openSheet(null, url);
+});
+
+// Paste a YouTube link anywhere (outside text fields) to add it.
+document.addEventListener("paste", (e) => {
+  const tag = document.activeElement?.tagName;
+  if (["INPUT", "TEXTAREA"].includes(tag) || document.querySelector("dialog[open]")) return;
+  const text = (e.clipboardData?.getData("text") || "").trim();
+  if (!YT_RE.test(text)) return;
+  e.preventDefault();
+  openSheet(null, text);
 });
 
 /* ---------- tabs & panes ---------- */
@@ -539,7 +616,7 @@ function setTab(tab) {
   $("list").hidden = tab !== "meetings";
   $("chat-list").hidden = tab !== "chats";
   $("drop-hint").hidden = tab !== "meetings";
-  $("new").title = tab === "chats" ? "Cuộc trò chuyện mới" : "Tải file ghi âm lên";
+  $("new").title = tab === "chats" ? "Cuộc trò chuyện mới" : "Thêm cuộc họp (file hoặc link YouTube)";
 }
 
 function showPane(kind) {

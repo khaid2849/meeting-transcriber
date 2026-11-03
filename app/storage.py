@@ -22,7 +22,7 @@ class Meeting:
     id: str
     title: str
     date: str
-    status: str = "queued"  # queued|converting|transcribing|done|error
+    status: str = "queued"  # queued|downloading|converting|transcribing|done|error
     progress: float = 0.0
     error: str | None = None
     keywords: str = ""
@@ -30,6 +30,7 @@ class Meeting:
     model: str | None = None
     original_name: str = ""
     created_at: str = ""
+    source_url: str | None = None  # YouTube link the audio was downloaded from
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -69,7 +70,8 @@ class MeetingStore:
             raise KeyError(meeting_id)
         return self.root / meeting_id
 
-    def create(self, *, title: str, date: str, keywords: str, original_name: str) -> Meeting:
+    def create(self, *, title: str, date: str, keywords: str, original_name: str,
+               source_url: str | None = None, duration: float | None = None) -> Meeting:
         base = slugify(title, date)
         meeting_id, n = base, 1
         while (self.root / meeting_id).exists():
@@ -77,7 +79,7 @@ class MeetingStore:
             meeting_id = f"{base}-{n}"
         (self.root / meeting_id).mkdir()
         meeting = Meeting(id=meeting_id, title=title, date=date, keywords=keywords,
-                          original_name=original_name,
+                          original_name=original_name, source_url=source_url, duration=duration,
                           created_at=datetime.now().isoformat(timespec="microseconds"))
         self.save(meeting)
         return meeting

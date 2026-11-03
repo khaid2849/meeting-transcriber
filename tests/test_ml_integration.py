@@ -1,4 +1,5 @@
 """Runs the real models on 60 s of the meeting recording. `uv run pytest -m slow`."""
+import shutil
 import subprocess
 
 import numpy as np
@@ -39,3 +40,15 @@ def test_release_model_frees_gpu_memory(samples):
     assert mx.get_active_memory() > 1e9
     release_model()
     assert mx.get_active_memory() < 3e8
+
+
+@pytest.mark.skipif(not shutil.which("ffprobe"), reason="needs ffmpeg")
+def test_youtube_download_real_video(tmp_path):
+    from app.audio import probe
+    from app.youtube import download_audio, fetch_info
+    url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # "Me at the zoo", 19 s, public since 2005
+    info = fetch_info(url)
+    assert info["title"] == "Me at the zoo" and info["date"] == "2005-04-24"
+    progress = []
+    path = download_audio(url, tmp_path, progress.append)
+    assert path.name.startswith("upload.") and probe(path)["duration"] == pytest.approx(19, abs=1.5)

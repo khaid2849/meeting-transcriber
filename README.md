@@ -17,13 +17,15 @@ uv sync
 ./setup_models.sh     # tải model (~3 GB), chạy lại không sao
 ```
 
+Khuyên cài thêm `brew install deno`: `yt-dlp` cần một bộ chạy JavaScript để lấy đủ định dạng từ YouTube (không có vẫn chạy, nhưng dễ lỗi khi YouTube thay đổi). Nếu YouTube báo lỗi lạ, cập nhật `yt-dlp`: `uv lock --upgrade-package yt-dlp && uv sync`.
+
 ## Chạy
 
 ```bash
 ./run.sh              # mở http://localhost:8765
 ```
 
-1. Kéo thả file ghi âm (wav, mp3, m4a, mp4… bất kỳ định dạng `ffmpeg` đọc được).
+1. Kéo thả file ghi âm hoặc video (wav, mp3, m4a, mp4, mov… bất kỳ định dạng `ffmpeg` đọc được), hoặc dán link video YouTube (⌘V ở bất kỳ đâu trong cửa sổ, hay chọn tab "Link YouTube" khi bấm +). Video YouTube phải công khai hoặc không công khai (unlisted); app chỉ tải phần âm thanh bằng `yt-dlp`.
 2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng).
 3. Đợi xử lý (đóng tab cũng được). Mất khoảng 1/4 thời lượng cuộc họp (đo trên M5: họp 34 phút xử lý trong ~9,5 phút).
 4. Mở cuộc họp: bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải bản ghi.

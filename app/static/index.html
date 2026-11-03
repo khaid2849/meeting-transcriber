@@ -30,7 +30,7 @@
     <nav class="list" id="list" aria-label="Danh sách cuộc họp"></nav>
     <nav class="list" id="chat-list" aria-label="Các cuộc trò chuyện" hidden></nav>
     <footer class="sidebar-foot">
-      <div class="drop-hint" id="drop-hint">Kéo thả file ghi âm vào cửa sổ để tải lên</div>
+      <div class="drop-hint" id="drop-hint">Kéo thả file ghi âm / video, hoặc dán link YouTube (⌘V)</div>
       <button class="foot-btn" id="open-settings">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"/></svg>
         Cài đặt AI
@@ -75,6 +75,7 @@
             <input type="date" id="date" tabindex="-1" aria-label="Ngày họp">
           </span>
           <span id="meta"></span>
+          <a class="source-link" id="source-link" target="_blank" rel="noopener noreferrer" hidden>YouTube ↗</a>
         </div>
 
         <div class="status" id="status" hidden>
@@ -137,18 +138,28 @@
   </main>
 </div>
 
-<div class="drop-overlay" id="drop-overlay" hidden><div>Thả file để tải lên</div></div>
+<div class="drop-overlay" id="drop-overlay" hidden><div>Thả file hoặc link YouTube để thêm</div></div>
 
 <dialog class="sheet" id="sheet">
   <form method="dialog" id="upload-form">
-    <h2>Tải file ghi âm lên</h2>
+    <h2>Thêm cuộc họp</h2>
+    <div class="segmented sheet-tabs" role="tablist">
+      <button type="button" role="tab" id="src-file" class="on">File ghi âm / video</button>
+      <button type="button" role="tab" id="src-yt">Link YouTube</button>
+    </div>
+    <label class="field" id="yt-field" hidden>Link video YouTube
+      <input type="url" id="f-url" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocomplete="off">
+      <small>Video công khai hoặc không công khai (unlisted). App chỉ tải phần âm thanh.</small>
+    </label>
     <label class="file-pick" id="file-pick">
       <input type="file" id="file" accept="audio/*,video/*" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
       <span id="file-name">Chọn file hoặc kéo thả vào đây</span>
     </label>
     <label class="field">Tiêu đề<input type="text" id="f-title" placeholder="Mặc định: tên file"></label>
-    <label class="field">Ngày họp<input type="date" id="f-date"></label>
+    <label class="field">Ngày họp<input type="date" id="f-date">
+      <small id="date-hint" hidden>Để trống: lấy ngày đăng video.</small>
+    </label>
     <label class="field">Từ khóa, thuật ngữ
       <input type="text" id="f-keywords" placeholder="VD: Odoo, Catalog AI, gói thầu, RAG">
       <small>Giúp Whisper nghe đúng tên riêng và thuật ngữ.</small>
