@@ -18,6 +18,7 @@ from app.ai.chats import ChatStore
 from app.ai.routes import ai_router
 from app.ai.settings import AISettings
 from app.assemble import group_paragraphs
+from app.messages import msg
 from app.storage import Meeting, MeetingStore
 from app.worker import ACTIVE, RealEngine, Worker, update_meeting
 
@@ -40,7 +41,7 @@ def _check_date(value: str) -> str:
     try:
         return Date.fromisoformat(value).isoformat()
     except ValueError:
-        raise HTTPException(422, "Ngày phải có dạng YYYY-MM-DD") from None
+        raise HTTPException(422, msg("err.date_format")) from None
 
 
 
@@ -67,7 +68,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
             origin = request.headers.get("origin")
             if request.headers.get("sec-fetch-site") == "cross-site" or (
                     origin and urlparse(origin).hostname not in hosts):
-                return JSONResponse({"detail": "Yêu cầu từ trang web khác bị chặn"}, status_code=403)
+                return JSONResponse({"detail": msg("err.cross_site")}, status_code=403)
         return await call_next(request)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     if ai_settings is not None and chats is not None:
@@ -77,7 +78,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         try:
             return store.get(meeting_id)
         except KeyError:
-            raise HTTPException(404, "Không tìm thấy cuộc họp") from None
+            raise HTTPException(404, msg("err.recording_not_found")) from None
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
@@ -117,7 +118,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     @app.post("/api/meetings/youtube", status_code=201)
     def create_from_youtube(body: YouTubeIn) -> dict:
         if not youtube.is_youtube_url(body.url):
-            raise HTTPException(422, "Chỉ nhận link một video YouTube (youtube.com/watch?v=… hoặc youtu.be/…)")
+            raise HTTPException(422, msg("err.youtube_link"))
         try:
             info = youtube.fetch_info(body.url)
         except youtube.YouTubeError as exc:
@@ -145,7 +146,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         changes = {}
         if patch.title is not None:
             if not patch.title.strip():
-                raise HTTPException(422, "Tiêu đề không được trống")
+                raise HTTPException(422, msg("err.title_empty"))
             changes["title"] = patch.title.strip()
         if patch.date is not None:
             changes["date"] = _check_date(patch.date)
@@ -154,7 +155,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     @app.post("/api/meetings/{meeting_id}/retry")
     def retry(meeting_id: str) -> dict:
         if get_or_404(meeting_id).status != "error":
-            raise HTTPException(409, "Chỉ chạy lại được cuộc họp bị lỗi")
+            raise HTTPException(409, msg("err.retry_only_error"))
         worker.enqueue(meeting_id)
         return store.get(meeting_id).to_dict()
 
@@ -162,7 +163,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     @app.delete("/api/meetings/{meeting_id}", status_code=204)
     def delete(meeting_id: str) -> Response:
         if get_or_404(meeting_id).status in ACTIVE:
-            raise HTTPException(409, "Đang xử lý, chưa xóa được")
+            raise HTTPException(409, msg("err.busy_delete"))
         store.delete(meeting_id)
         return Response(status_code=204)
 
@@ -170,14 +171,14 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
     def audio(meeting_id: str):
         path = store.dir(get_or_404(meeting_id).id) / "audio.m4a"
         if not path.exists():
-            raise HTTPException(404, "Chưa có audio")
+            raise HTTPException(404, msg("err.no_audio"))
         return FileResponse(path, media_type="audio/mp4")
 
     @app.get("/api/meetings/{meeting_id}/transcript.md")
     def transcript(meeting_id: str):
         path = store.dir(get_or_404(meeting_id).id) / "transcript.md"
         if not path.exists():
-            raise HTTPException(404, "Chưa có bản ghi")
+            raise HTTPException(404, msg("err.no_transcript"))
         return FileResponse(path, media_type="text/markdown; charset=utf-8",
                             filename=f"{meeting_id}.md")
 

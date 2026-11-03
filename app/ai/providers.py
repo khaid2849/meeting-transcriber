@@ -1,6 +1,8 @@
 """Streaming chat and model listing for Claude, OpenAI and Gemini behind one interface."""
 from collections.abc import Callable, Iterator
 
+from app.messages import msg
+
 # Models that accept Anthropic's server-side refusal fallback ("default" routing).
 FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -13,7 +15,7 @@ OPENAI_EXCLUDE = ("audio", "realtime", "tts", "transcribe", "image", "embedding"
 
 
 class ProviderError(Exception):
-    """A provider call failed; the message is already user-facing (Vietnamese)."""
+    """A provider call failed; the message is a key from app.messages."""
 
 
 def chat_history(messages: list[dict]) -> list[dict]:
@@ -69,17 +71,17 @@ def friendly_error(exc: Exception) -> str:
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     detail = getattr(exc, "message", None) or str(exc)
     if status in (401, 403):
-        return "API key không hợp lệ hoặc không có quyền dùng model này."
+        return msg("ai.auth")
     if status == 404:
-        return "Model không tồn tại hoặc tài khoản không dùng được model này."
+        return msg("ai.model_not_found")
     if status == 429:
-        return "Bị giới hạn tốc độ hoặc đã hết hạn mức của nhà cung cấp. Thử lại sau."
+        return msg("ai.rate_limit")
     if isinstance(status, int) and status >= 500:
-        return f"Nhà cung cấp đang lỗi ({status}). Thử lại sau."
+        return msg("ai.server", status=status)
     name = type(exc).__name__
     if isinstance(exc, (ConnectionError, TimeoutError)) or "Connection" in name or "Timeout" in name:
-        return "Không kết nối được tới nhà cung cấp AI."
-    return f"Lỗi từ nhà cung cấp AI: {detail}"
+        return msg("ai.network")
+    return msg("ai.other", detail=detail)
 
 
 # ---------- Claude ----------
@@ -103,9 +105,9 @@ def _anthropic_stream(cfg: dict, system: str, history: list[dict]) -> Iterator[s
         yield from stream.text_stream
         final = stream.get_final_message()
     if final.stop_reason == "refusal":
-        raise ProviderError("Claude từ chối trả lời yêu cầu này.")
+        raise ProviderError(msg("ai.refused"))
     if final.stop_reason == "max_tokens":
-        yield "\n\n_(Câu trả lời bị cắt vì quá dài.)_"
+        raise ProviderError(msg("ai.truncated"))  # saved as a warning under the partial answer
 
 
 def _anthropic_models(cfg: dict) -> list[str]:

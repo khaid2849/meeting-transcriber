@@ -17,6 +17,7 @@ from app.ai.prompting import build_system_prompt, estimate_tokens
 from app.ai.providers import ProviderError, chat_history, list_models, stream_reply
 from app.ai.settings import AISettings
 from app.assemble import group_paragraphs
+from app.messages import msg
 from app.storage import MeetingStore
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class ChatPatch(BaseModel):
 
 class MessageIn(BaseModel):
     content: str
+    lang: Literal["vi", "en"] = "vi"  # language of the answer, follows the UI
 
 
 def _line(obj: dict) -> str:
@@ -98,7 +100,7 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         try:
             return chats.get(chat_id)
         except KeyError:
-            raise HTTPException(404, "Không tìm thấy cuộc trò chuyện") from None
+            raise HTTPException(404, msg("chat.not_found")) from None
 
     def scope(meeting_ids: list[str]) -> tuple[list[dict], list[dict]]:
         """Return (meeting info for the UI, transcripts usable as context)."""
@@ -138,7 +140,7 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         try:
             entry = settings.update(provider_id, **body.model_dump())
         except KeyError:
-            raise HTTPException(404, "Không tìm thấy cấu hình AI") from None
+            raise HTTPException(404, msg("ai.config_not_found")) from None
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         return public_provider(entry)
@@ -153,7 +155,7 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         try:
             settings.set_default(body.id)
         except KeyError:
-            raise HTTPException(404, "Không tìm thấy cấu hình AI") from None
+            raise HTTPException(404, msg("ai.config_not_found")) from None
         return settings.public()
 
     @router.post("/api/ai/models")
@@ -162,7 +164,7 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
             try:
                 entry = settings.get(body.provider_id)
             except KeyError:
-                raise HTTPException(404, "Không tìm thấy cấu hình AI") from None
+                raise HTTPException(404, msg("ai.config_not_found")) from None
             provider, key = entry["provider"], (body.api_key or "").strip() or entry["api_key"]
             base_url = (body.base_url or "").strip().rstrip("/") or entry.get("base_url")
         else:
@@ -170,9 +172,9 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
             base_url = (body.base_url or "").strip().rstrip("/") or None
         if provider == "openai_compat":
             if not base_url:
-                raise HTTPException(422, "Cần nhập Base URL")
+                raise HTTPException(422, msg("ai.need_base_url"))
         elif not provider or not key:
-            raise HTTPException(422, "Cần chọn nhà cung cấp và nhập API key")
+            raise HTTPException(422, msg("ai.need_key"))
         try:
             return {"models": list_models(provider, key, base_url)}
         except ProviderError as exc:
@@ -211,7 +213,7 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         get_chat(chat_id)
         changes = {k: v for k, v in body.model_dump().items() if v is not None}
         if "title" in changes and not changes["title"].strip():
-            raise HTTPException(422, "Tên cuộc trò chuyện không được trống")
+            raise HTTPException(422, msg("chat.title_empty"))
         return chats.update(chat_id, **changes)
 
     @router.delete("/api/chats/{chat_id}", status_code=204)
@@ -225,19 +227,19 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
         chat = get_chat(chat_id)
         question = body.content.strip()
         if not question:
-            raise HTTPException(422, "Câu hỏi không được trống")
+            raise HTTPException(422, msg("chat.question_empty"))
         try:
             cfg = settings.get(chat["provider_id"]) if chat["provider_id"] else settings.default()
         except KeyError:
             cfg = settings.default()
         if not cfg:
-            raise HTTPException(400, "Chưa cấu hình AI. Mở Cài đặt AI để thêm API key.")
+            raise HTTPException(400, msg("ai.not_configured"))
 
-        busy = "Đang có câu trả lời chạy trong cuộc trò chuyện này"
+        busy = msg("chat.busy")
         if chat_id in streaming:
             raise HTTPException(409, busy)
         _, usable = scope(chat["meeting_ids"])
-        system, labels = build_system_prompt(usable)
+        system, labels = build_system_prompt(usable, body.lang)
         history = chat_history(chat["messages"]) + [{"role": "user", "content": question}]
         # Labels are saved per answer so citations keep pointing at the right meeting after scope edits.
         meta = {"provider": cfg["name"], "model": cfg["model"], "labels": labels}
@@ -269,21 +271,21 @@ def ai_router(meetings: MeetingStore, settings: AISettings, chats: ChatStore) ->
                     chats.append(chat_id, {"role": "user", "content": question})
                 except KeyError:
                     saved = True
-                    yield _line({"error": "Cuộc trò chuyện đã bị xóa"})
+                    yield _line({"error": msg("chat.deleted")})
                     return
                 for delta in stream_reply(cfg, system, history):
                     parts.append(delta)
                     yield _line({"delta": delta})
                 if not "".join(parts).strip():
-                    raise ProviderError("Nhà cung cấp không trả về nội dung (có thể bị bộ lọc an toàn chặn).")
+                    raise ProviderError(msg("ai.empty_answer"))
                 saved = True
-                yield _line({"done": True} if save() else {"error": "Cuộc trò chuyện đã bị xóa"})
+                yield _line({"done": True} if save() else {"error": msg("chat.deleted")})
             except ProviderError as exc:
                 saved = True
-                yield _line({"error": str(exc)} if save(str(exc)) else {"error": "Cuộc trò chuyện đã bị xóa"})
+                yield _line({"error": str(exc)} if save(str(exc)) else {"error": msg("chat.deleted")})
             finally:
                 if not saved:  # client went away mid-answer: keep what arrived
-                    save("Đã dừng giữa chừng")
+                    save(msg("chat.stopped"))
                 streaming.discard(chat_id)
 
         return StreamingResponse(close_on_exit(generate()), media_type="application/x-ndjson",

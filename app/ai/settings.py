@@ -5,6 +5,7 @@ import threading
 import uuid
 from pathlib import Path
 
+from app.messages import msg
 from app.storage import write_text_atomic
 
 PROVIDERS = ("anthropic", "openai", "gemini", "openai_compat")
@@ -106,17 +107,17 @@ def _clean_url(url: str | None) -> str:
 
 def _validate(entry: dict) -> None:
     if entry["provider"] not in PROVIDERS:
-        raise ValueError(f"Nhà cung cấp không hỗ trợ: {entry['provider']}")
-    required = [("name", "Tên"), ("model", "Model")]
+        raise ValueError(msg("ai.bad_provider", provider=entry["provider"]))
+    required = ["name", "model"]
     if entry["provider"] == COMPAT:  # local servers (Ollama, LM Studio) need no key
         url = entry.get("base_url") or ""
         if not url.startswith(("http://", "https://")):
-            raise ValueError("Base URL phải bắt đầu bằng http:// hoặc https://")
+            raise ValueError(msg("ai.bad_base_url"))
     else:
-        required.append(("api_key", "API key"))
+        required.append("api_key")
     if entry["api_key"] and not re.fullmatch(r"[\x21-\x7e]+", entry["api_key"]):
         # Never echo the key: a malformed one ends up in HTTP-library error messages.
-        raise ValueError("API key chứa khoảng trắng hoặc ký tự không hợp lệ")
-    for field, label in required:
+        raise ValueError(msg("ai.bad_key"))
+    for field in required:
         if not entry[field]:
-            raise ValueError(f"{label} không được trống")
+            raise ValueError(msg("ai.field_empty", field=field))

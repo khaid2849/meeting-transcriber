@@ -393,3 +393,8 @@ svg { display: block; }
 .compat-fields { display: flex; flex-direction: column; gap: 10px; }
 .notice.warn { background: color-mix(in srgb, #ff9f0a 16%, transparent); }
 .md a { color: var(--accent); }
+
+.foot-row { display: flex; align-items: center; gap: 6px; }
+.foot-row .foot-btn { flex: 1; }
+.lang-switch { flex: none; margin: 0; }
+.lang-switch button { padding: 2px 8px; font-size: 11px; }

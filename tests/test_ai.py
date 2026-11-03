@@ -76,7 +76,7 @@ def test_get_unknown_raises_keyerror(tmp_path):
 def test_chat_create_append_and_list(tmp_path):
     c = ChatStore(tmp_path)
     chat = c.create(meeting_ids=["2026-11-02-a"], provider_id="p1")
-    assert chat["title"] == "Cuộc trò chuyện mới" and chat["messages"] == []
+    assert chat["title"] == "@chat.untitled" and chat["messages"] == []
     c.append(chat["id"], {"role": "user", "content": "Tóm tắt cuộc họp giúp tôi về hạ tầng GPU và chi phí"})
     got = c.get(chat["id"])
     assert got["title"] == "Tóm tắt cuộc họp giúp tôi về hạ tầng GPU và chi phí"
@@ -129,7 +129,8 @@ MEETINGS = [
 def test_system_prompt_labels_meetings_and_timestamps():
     prompt, labels = build_system_prompt(MEETINGS)
     assert labels == {"M1": "2026-11-02-ha-tang", "M2": "2026-10-28-thau"}
-    assert '<meeting id="M1" title="Hạ tầng AI" date="2026-11-02">' in prompt
+    assert '<recording id="M1" title="Hạ tầng AI" date="2026-11-02">' in prompt
+    assert "cuộc họp" not in prompt  # the app is for any audio/video, not only meetings
     assert "[00:11:41] Chọn card inference." in prompt
     assert "[01:02:05] Tiêu chí chấm điểm." in prompt
     assert "[M1 00:11:41]" in prompt  # citation format is explained
@@ -177,3 +178,27 @@ def test_rejects_keys_that_are_not_printable_ascii(tmp_path, key):
     with pytest.raises(ValueError) as exc:
         AISettings(tmp_path / "ai.json").add(name="X", provider="openai", api_key=key, model="m")
     assert key not in str(exc.value)
+
+
+def test_system_prompt_in_english():
+    prompt, _ = build_system_prompt(MEETINGS, "en")
+    assert "Answer in English" in prompt and "[M1 00:11:41]" in prompt and "tiếng Việt" not in prompt
+    assert "No recordings" in build_system_prompt([], "en")[0]
+
+
+def test_settings_errors_are_message_keys(tmp_path):
+    s = AISettings(tmp_path / "ai.json")
+    with pytest.raises(ValueError, match=r'^@ai\.field_empty:\{"field": "name"\}$'):
+        s.add(name="", provider="openai", api_key="k-123456789", model="m")
+
+
+def test_legacy_default_title_reads_as_message_key(tmp_path):
+    import json as _json
+    c = ChatStore(tmp_path)
+    chat = c.create(meeting_ids=[], provider_id=None)
+    path = tmp_path / f"{chat['id']}.json"
+    data = _json.loads(path.read_text(encoding="utf-8"))
+    data["title"] = "Cuộc trò chuyện mới"
+    path.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert c.get(chat["id"])["title"] == "@chat.untitled"
+    assert c.list()[0]["title"] == "@chat.untitled"

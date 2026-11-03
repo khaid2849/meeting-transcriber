@@ -56,11 +56,12 @@ class _Err(Exception):
 
 
 def test_friendly_error_maps_status_codes():
-    assert "API key" in friendly_error(_Err(401))
-    assert "giới hạn" in friendly_error(_Err(429))
-    assert "Model" in friendly_error(_Err(404))
-    assert "raw detail" in friendly_error(_Err(400, "raw detail"))
-    assert "kết nối" in friendly_error(ConnectionError("x"))
+    assert friendly_error(_Err(401)) == "@ai.auth"
+    assert friendly_error(_Err(429)) == "@ai.rate_limit"
+    assert friendly_error(_Err(404)) == "@ai.model_not_found"
+    assert friendly_error(_Err(503)) == '@ai.server:{"status": 503}'
+    assert friendly_error(_Err(400, "raw detail")) == '@ai.other:{"detail": "raw detail"}'
+    assert friendly_error(ConnectionError("x")) == "@ai.network"
 
 
 def test_stream_reply_dispatches_by_provider(monkeypatch):

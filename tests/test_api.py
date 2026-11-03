@@ -162,7 +162,7 @@ def test_favicon_and_manifest_served(client):
     r = client.get("/favicon.ico")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     m = client.get("/static/manifest.webmanifest")
-    assert m.status_code == 200 and m.json()["name"] == "Bản ghi cuộc họp"
+    assert m.status_code == 200 and m.json()["name"] == "Transcriber"
     assert client.get("/static/icon.svg").status_code == 200
     assert client.get("/static/apple-touch-icon.png").status_code == 200
 

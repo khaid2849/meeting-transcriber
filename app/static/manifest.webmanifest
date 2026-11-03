@@ -1,7 +1,7 @@
 {
-  "name": "Bản ghi cuộc họp",
-  "short_name": "Cuộc họp",
-  "description": "Chuyển ghi âm cuộc họp thành văn bản và hỏi AI về nội dung",
+  "name": "Transcriber",
+  "short_name": "Transcriber",
+  "description": "Chuyển âm thanh, video và link YouTube thành văn bản, rồi hỏi AI về nội dung",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

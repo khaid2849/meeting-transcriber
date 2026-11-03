@@ -165,7 +165,7 @@ def test_send_without_any_provider_is_rejected(client, stores):
     _, _, _, done_id, _ = stores
     chat_id = client.post("/api/chats", json={"meeting_ids": [done_id]}).json()["id"]
     r = client.post(f"/api/chats/{chat_id}/messages", json={"content": "Hỏi"})
-    assert r.status_code == 400 and "cấu hình" in r.json()["detail"]
+    assert r.status_code == 400 and r.json()["detail"] == "@ai.not_configured"
 
 
 def test_send_rejects_empty_question(client, stores):
@@ -269,7 +269,7 @@ def test_chat_deleted_mid_stream_does_not_crash_or_resurrect(client, stores, mon
 
     monkeypatch.setattr(routes, "stream_reply", fake_stream)
     r = client.post(f"/api/chats/{chat_id}/messages", json={"content": "Hỏi"})
-    assert r.status_code == 200 and ndjson(r)[-1] == {"error": "Cuộc trò chuyện đã bị xóa"}
+    assert r.status_code == 200 and ndjson(r)[-1] == {"error": "@chat.deleted"}
     assert client.get(f"/api/chats/{chat_id}").status_code == 404
 
 
@@ -284,3 +284,14 @@ def test_cross_site_writes_are_blocked(client):
 def test_chats_tab_url_serves_shell(client):
     assert client.get("/c").text == client.get("/").text
 
+
+
+def test_answer_language_follows_request(client, stores, monkeypatch):
+    _, _, _, done_id, _ = stores
+    add_provider(client)
+    systems = []
+    monkeypatch.setattr(routes, "stream_reply", lambda cfg, system, history: systems.append(system) or iter(["ok"]))
+    chat_id = client.post("/api/chats", json={"meeting_ids": [done_id]}).json()["id"]
+    client.post(f"/api/chats/{chat_id}/messages", json={"content": "Summary?", "lang": "en"})
+    client.post(f"/api/chats/{chat_id}/messages", json={"content": "Tóm tắt?"})
+    assert "Answer in English" in systems[0] and "tiếng Việt" in systems[1]

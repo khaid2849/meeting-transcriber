@@ -10,6 +10,7 @@ import numpy as np
 
 from app.assemble import render_markdown, to_utterances
 from app.filters import clean_segments
+from app.messages import msg
 from app.storage import Meeting, MeetingStore, write_text_atomic
 
 log = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class Worker:
         for m in reversed(self.store.list()):  # oldest first; unreadable meetings are skipped
             if m.status in ACTIVE:
                 self.store.update(m.id, status="error",
-                                  error="Server bị tắt giữa chừng. Bấm \"Chạy lại\" để xử lý lại.")
+                                  error=msg("job.interrupted"))
             elif m.status == "queued":
                 self.queue.put(m.id)
 
@@ -149,7 +150,7 @@ class Worker:
             else:
                 upload.rename(folder / f"original{upload.suffix}")
         elif not audio.exists():
-            raise RuntimeError("Không tìm thấy file audio của cuộc họp")
+            raise RuntimeError(msg("job.no_audio"))
 
         meeting = self.store.get(meeting_id)
         on_progress = self._stage(meeting_id, "transcribing")

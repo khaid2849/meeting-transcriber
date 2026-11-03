@@ -6,11 +6,19 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from app.messages import msg
 from app.storage import write_text_atomic
 
 ID_RE = re.compile(r"^[a-f0-9]{12}$")
-DEFAULT_TITLE = "Cuộc trò chuyện mới"
+DEFAULT_TITLE = msg("chat.untitled")
+LEGACY_TITLES = {DEFAULT_TITLE, "Cuộc trò chuyện mới"}  # before titles became message keys
 TITLE_MAX = 60
+
+
+def _normalize(chat: dict) -> dict:
+    if chat.get("title") in LEGACY_TITLES:
+        chat["title"] = DEFAULT_TITLE
+    return chat
 
 
 def _now() -> str:
@@ -35,7 +43,7 @@ class ChatStore:
         path = self._path(chat_id)
         if not path.exists():
             raise KeyError(chat_id)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _normalize(json.loads(path.read_text(encoding="utf-8")))
 
     def create(self, *, meeting_ids: list[str], provider_id: str | None) -> dict:
         now = _now()
@@ -60,7 +68,7 @@ class ChatStore:
         with self.lock:
             chat = self.get(chat_id)
             chat["messages"].append({**message, "created_at": _now()})
-            if chat["title"] == DEFAULT_TITLE and message["role"] == "user":
+            if chat["title"] in LEGACY_TITLES and message["role"] == "user":
                 text = " ".join(message["content"].split())
                 chat["title"] = text if len(text) <= TITLE_MAX else text[:TITLE_MAX].rstrip() + "…"
             chat["updated_at"] = _now()
@@ -76,7 +84,7 @@ class ChatStore:
         out = []
         for path in self.root.glob("*.json"):
             try:
-                chat = json.loads(path.read_text(encoding="utf-8"))
+                chat = _normalize(json.loads(path.read_text(encoding="utf-8")))
             except ValueError:
                 continue
             summary = {k: v for k, v in chat.items() if k != "messages"}

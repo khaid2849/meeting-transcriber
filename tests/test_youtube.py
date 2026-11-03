@@ -40,12 +40,12 @@ def test_info_summary_rejects_live_and_playlists():
 
 
 @pytest.mark.parametrize("raw,expected", [
-    ("ERROR: [youtube] abc: Private video. Sign in if you've been granted access", "riêng tư"),
-    ("ERROR: [youtube] abc: Video unavailable", "không tồn tại"),
-    ("ERROR: [youtube] abc: Sign in to confirm your age", "giới hạn độ tuổi"),
-    ("ERROR: [youtube] abc: Sign in to confirm you’re not a bot", "chặn"),
-    ("ERROR: unable to download webpage: <urlopen error [Errno 8] nodename nor servname provided>", "kết nối"),
-    ("ERROR: something new", "something new"),
+    ("ERROR: [youtube] abc: Private video. Sign in if you've been granted access", "@yt.private"),
+    ("ERROR: [youtube] abc: Video unavailable", "@yt.unavailable"),
+    ("ERROR: [youtube] abc: Sign in to confirm your age", "@yt.age"),
+    ("ERROR: [youtube] abc: Sign in to confirm you’re not a bot", "@yt.bot"),
+    ("ERROR: unable to download webpage: <urlopen error [Errno 8] nodename nor servname provided>", "@yt.network"),
+    ("ERROR: something new", '@yt.other:{"detail": "something new"}'),
 ])
 def test_friendly_error(raw, expected):
-    assert expected in friendly_error(raw)
+    assert friendly_error(raw) == expected

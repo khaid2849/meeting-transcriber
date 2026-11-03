@@ -1,13 +1,5 @@
 "use strict";
 
-const STATUS = {
-  queued: "Đang chờ xử lý",
-  downloading: "Đang tải từ YouTube",
-  converting: "Đang chuyển định dạng",
-  transcribing: "Đang chuyển thành văn bản",
-  done: "Xong",
-  error: "Lỗi",
-};
 const ACTIVE = ["queued", "downloading", "converting", "transcribing"];
 const RUNNING = ["downloading", "converting", "transcribing"];
 // Same rule as app/youtube.py: a single video, not a channel or playlist.
@@ -55,7 +47,8 @@ function longDuration(sec) {
   const s = Math.round(sec);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  return [h && `${h} giờ`, m && `${m} phút`, !h && `${s % 60} giây`].filter(Boolean).join(" ");
+  return [h && t("duration.h", { n: h }), m && t("duration.m", { n: m }), !h && t("duration.s", { n: s % 60 })]
+    .filter(Boolean).join(" ");
 }
 
 function parseDay(iso) {
@@ -64,11 +57,11 @@ function parseDay(iso) {
 }
 
 function shortDate(iso) {
-  return parseDay(iso).toLocaleDateString("vi-VN", { day: "numeric", month: "short", year: "numeric" });
+  return parseDay(iso).toLocaleDateString(LOCALE(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function longDate(iso) {
-  return parseDay(iso).toLocaleDateString("vi-VN", { day: "numeric", month: "long", year: "numeric" });
+  return parseDay(iso).toLocaleDateString(LOCALE(), { day: "numeric", month: "long", year: "numeric" });
 }
 
 function todayIso() {
@@ -78,16 +71,17 @@ function todayIso() {
 
 function groupLabel(iso) {
   const days = Math.round((parseDay(todayIso()) - parseDay(iso)) / 86400000);
-  if (days <= 0) return "Hôm nay";
-  if (days === 1) return "Hôm qua";
-  if (days < 7) return "7 ngày qua";
-  if (days < 30) return "30 ngày qua";
+  if (days <= 0) return t("group.today");
+  if (days === 1) return t("group.yesterday");
+  if (days < 7) return t("group.week");
+  if (days < 30) return t("group.month");
   const d = parseDay(iso);
-  return `Tháng ${d.getMonth() + 1}, ${d.getFullYear()}`;
+  return t("group.monthYear", { month: d.getMonth() + 1, year: d.getFullYear(),
+    monthName: d.toLocaleDateString(LOCALE(), { month: "long" }) });
 }
 
 function statusLine(m) {
-  let text = STATUS[m.status] || m.status;
+  let text = t(`status.${m.status}`);
   if (RUNNING.includes(m.status) && m.progress > 0) text += ` ${Math.round(m.progress * 100)}%`;
   return text;
 }
@@ -97,7 +91,7 @@ async function api(path, options = {}) {
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (_) { /* not JSON */ }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new Error(tr(typeof detail === "string" ? detail : JSON.stringify(detail)));
   }
   return res.status === 204 ? null : res.json();
 }
@@ -142,7 +136,7 @@ async function refresh() {
 function renderList() {
   const list = $("list");
   if (!state.meetings.length) {
-    list.replaceChildren(el("div", { className: "list-empty", textContent: "Chưa có cuộc họp nào" }));
+    list.replaceChildren(el("div", { className: "list-empty", textContent: t("list.empty") }));
     return;
   }
   const nodes = [];
@@ -178,9 +172,7 @@ function showEmpty() {
   $("meeting").hidden = true;
   $("empty").hidden = false;
   const none = !state.meetings.length;
-  $("empty-text").textContent = none
-    ? "Chưa có cuộc họp nào. Kéo thả file ghi âm / video, hoặc dán link YouTube để bắt đầu."
-    : "Chọn một cuộc họp ở bên trái";
+  $("empty-text").textContent = none ? t("empty.none") : t("empty.select");
   $("empty-new").hidden = !none;
   for (const id of ["copy", "download", "delete"]) $(id).disabled = true;
   $("retry").hidden = true;
@@ -240,7 +232,7 @@ function renderMeeting(m, paragraphs) {
   const active = ACTIVE.includes(m.status);
   $("status").hidden = done;
   $("status-text").className = `status-text${m.status === "error" ? " error" : ""}`;
-  $("status-text").textContent = m.status === "error" ? `Lỗi: ${m.error}` : statusLine(m);
+  $("status-text").textContent = m.status === "error" ? t("error.prefix", { message: tr(m.error) }) : statusLine(m);
   $("progress").parentElement.hidden = !active;
   $("progress").style.width = `${Math.round((m.progress || 0) * 100)}%`;
 
@@ -269,15 +261,15 @@ function renderMeeting(m, paragraphs) {
 function renderTranscript(paragraphs, active) {
   const box = $("transcript");
   if (!paragraphs) {
-    box.replaceChildren(active ? el("p", { className: "transcript-empty", textContent: "Bản ghi sẽ hiện ở đây khi xử lý xong. Bạn có thể đóng trang và quay lại sau." }) : "");
+    box.replaceChildren(active ? el("p", { className: "transcript-empty", textContent: t("transcript.pending") }) : "");
     return;
   }
   if (!paragraphs.length) {
-    box.replaceChildren(el("p", { className: "transcript-empty", textContent: "Không nhận ra lời nói nào trong file này." }));
+    box.replaceChildren(el("p", { className: "transcript-empty", textContent: t("transcript.empty") }));
     return;
   }
   box.replaceChildren(...paragraphs.map((p) => {
-    const ts = el("button", { className: "ts", textContent: clock(p.start), title: "Nghe từ đoạn này" });
+    const ts = el("button", { className: "ts", textContent: clock(p.start), title: t("transcript.listen") });
     ts.onclick = () => { audio.currentTime = p.start; audio.play(); };
     const node = el("div", { className: "para" }, ts, el("p", { textContent: p.text }));
     node.dataset.start = p.start;
@@ -306,8 +298,8 @@ function updatePlayer() {
 
 audio.ontimeupdate = updatePlayer;
 audio.onloadedmetadata = updatePlayer;
-audio.onplay = () => { $("play").classList.add("playing"); $("play").setAttribute("aria-label", "Tạm dừng"); };
-audio.onpause = () => { $("play").classList.remove("playing"); $("play").setAttribute("aria-label", "Phát"); };
+audio.onplay = () => { $("play").classList.add("playing"); $("play").setAttribute("aria-label", t("pause")); };
+audio.onpause = () => { $("play").classList.remove("playing"); $("play").setAttribute("aria-label", t("play")); };
 $("play").onclick = () => (audio.paused ? audio.play() : audio.pause());
 $("back15").onclick = () => { audio.currentTime = Math.max(0, audio.currentTime - 15); };
 $("fwd15").onclick = () => { audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + 15); };
@@ -344,7 +336,7 @@ async function patch(changes) {
     renderList();
     return true;
   } catch (err) {
-    toast(`Không lưu được: ${err.message}`);
+    toast(t("save.failed", { message: err.message }));
     return false;
   }
 }
@@ -374,9 +366,9 @@ $("copy").onclick = async () => {
     } else {
       await navigator.clipboard.writeText(await (await blob).text());
     }
-    toast("Đã copy bản ghi");
+    toast(t("copied.transcript"));
   } catch (err) {
-    toast("Không copy được, hãy dùng nút tải .md");
+    toast(t("copy.failed"));
   }
 };
 $("download").onclick = () => { location.href = `/api/meetings/${state.selected}/transcript.md`; };
@@ -389,7 +381,7 @@ $("retry").onclick = async () => {
   refresh();
 };
 $("delete").onclick = async () => {
-  if (!confirm(`Xóa "${state.meeting.title}" cùng toàn bộ file audio và bản ghi?`)) return;
+  if (!confirm(t("confirm.delete.recording", { title: state.meeting.title }))) return;
   try {
     await api(`/api/meetings/${state.selected}`, { method: "DELETE" });
   } catch (err) {
@@ -422,8 +414,8 @@ function setSource(kind) {
   $("file-pick").hidden = yt;
   $("yt-field").hidden = !yt;
   $("date-hint").hidden = !yt;
-  $("f-title").placeholder = yt ? "Để trống: lấy tên video" : "Mặc định: tên file";
-  $("submit").textContent = yt ? "Lấy video" : "Tải lên";
+  $("f-title").placeholder = t(yt ? "f.title.ph.yt" : "f.title.ph.file");
+  $("submit").textContent = t(yt ? "yt.submit" : "upload");
   // A YouTube video defaults to its upload date; a file to today.
   if (yt && $("f-date").value === todayIso()) $("f-date").value = "";
   if (!yt && !$("f-date").value) $("f-date").value = todayIso();
@@ -449,7 +441,7 @@ function openSheet(file = null, url = null) {
   pendingFile = null;
   $("upload-form").reset();
   $("f-date").value = todayIso();
-  $("file-name").textContent = "Chọn file hoặc kéo thả vào đây";
+  $("file-name").textContent = t("file.pick");
   $("file-pick").classList.remove("has-file", "over");
   $("submit").disabled = true;
   $("upload-msg").textContent = "";
@@ -466,7 +458,7 @@ async function submitYoutube() {
   ytBusy = true;
   updateSubmit();
   msg.className = "sheet-msg";
-  msg.textContent = "Đang lấy thông tin video…";
+  msg.textContent = t("yt.fetching");
   try {
     const m = await api("/api/meetings/youtube", {
       method: "POST",
@@ -474,13 +466,13 @@ async function submitYoutube() {
     });
     ytBusy = false;
     $("sheet").close();
-    toast("Đang tải âm thanh từ YouTube…");
+    toast(t("yt.started"));
     await refresh();
     select(m.id);
   } catch (err) {
     ytBusy = false;
     msg.className = "sheet-msg error";
-    msg.textContent = `Lỗi: ${err.message}`;
+    msg.textContent = t("error.prefix", { message: err.message });
     updateSubmit();
   }
 }
@@ -509,7 +501,7 @@ $("upload-form").onsubmit = (e) => {
   bar.hidden = false;
   bar.firstElementChild.style.width = "0";
   msg.className = "sheet-msg";
-  msg.textContent = "Đang tải lên…";
+  msg.textContent = t("upload.progress");
   $("submit").disabled = true;
 
   xhr = new XMLHttpRequest();
@@ -522,7 +514,7 @@ $("upload-form").onsubmit = (e) => {
     if (req.status === 201) {
       const m = JSON.parse(req.responseText);
       $("sheet").close();
-      toast("Đã tải lên, đang xử lý ở nền");
+      toast(t("upload.started"));
       await refresh();
       select(m.id);
       return;
@@ -530,7 +522,7 @@ $("upload-form").onsubmit = (e) => {
     let detail = req.statusText;
     try { detail = JSON.parse(req.responseText).detail; } catch (_) { /* keep statusText */ }
     msg.className = "sheet-msg error";
-    msg.textContent = `Lỗi: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`;
+    msg.textContent = t("error.prefix", { message: tr(typeof detail === "string" ? detail : JSON.stringify(detail)) });
     bar.hidden = true;
     $("submit").disabled = false;
   };
@@ -538,7 +530,7 @@ $("upload-form").onsubmit = (e) => {
     xhr = null;
     bar.hidden = true;
     msg.className = "sheet-msg error";
-    msg.textContent = ev.type === "abort" ? "Đã hủy tải lên." : "Lỗi kết nối khi tải lên.";
+    msg.textContent = t(ev.type === "abort" ? "upload.aborted" : "upload.network");
     $("submit").disabled = false;
   };
   xhr.open("POST", "/api/meetings");
@@ -572,7 +564,7 @@ window.addEventListener("drop", (e) => {
     return;
   }
   const url = (e.dataTransfer.getData("text/uri-list") || "").split("\n")[0].trim();
-  if (!YT_RE.test(url)) { toast("Chỉ nhận file ghi âm / video hoặc link YouTube"); return; }
+  if (!YT_RE.test(url)) { toast(t("drop.rejected")); return; }
   if ($("sheet").open) { setSource("youtube"); $("f-url").value = url; updateSubmit(); } else openSheet(null, url);
 });
 
@@ -588,26 +580,21 @@ document.addEventListener("paste", (e) => {
 
 /* ---------- tabs & panes ---------- */
 
-const PROVIDER_NAMES = { anthropic: "Claude", openai: "OpenAI", gemini: "Gemini", openai_compat: "Tương thích OpenAI" };
+const providerName = (p) => ({ anthropic: "Claude", openai: "OpenAI", gemini: "Gemini" }[p] || t("prov.compat"));
 const COMPAT_PRESETS = [
-  ["Alibaba Qwen (quốc tế)", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "qwen-max"],
-  ["Alibaba Qwen (Trung Quốc)", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max"],
+  ["@preset.qwen.intl", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "qwen-max"],
+  ["@preset.qwen.cn", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max"],
   ["DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"],
   ["OpenRouter", "https://openrouter.ai/api/v1", ""],
   ["Groq", "https://api.groq.com/openai/v1", ""],
   ["Mistral", "https://api.mistral.ai/v1", ""],
   ["Together AI", "https://api.together.xyz/v1", ""],
-  ["Ollama (trên máy)", "http://localhost:11434/v1", ""],
-  ["LM Studio (trên máy)", "http://localhost:1234/v1", ""],
+  ["@preset.ollama", "http://localhost:11434/v1", ""],
+  ["@preset.lmstudio", "http://localhost:1234/v1", ""],
 ];
 const SMALL_CONTEXT_TOKENS = 28000;
 const DEFAULT_MODELS = { anthropic: "claude-opus-5-5" };
-const SUGGESTIONS = [
-  ["Tóm tắt", "Tóm tắt nội dung chính: chủ đề, các ý quan trọng và kết luận."],
-  ["Các quyết định", "Liệt kê các quyết định đã được chốt, kèm nguồn."],
-  ["Việc cần làm", "Liệt kê các việc cần làm (ai làm, làm gì, hạn nếu có) và các câu hỏi còn bỏ ngỏ."],
-  ["Điểm chưa rõ", "Những điểm nào còn tranh luận hoặc chưa rõ ràng?"],
-];
+const SUGGESTIONS = ["summary", "decisions", "todo", "open"]; // labels and prompts live in i18n.js
 
 function setTab(tab) {
   state.tab = tab;
@@ -616,7 +603,7 @@ function setTab(tab) {
   $("list").hidden = tab !== "meetings";
   $("chat-list").hidden = tab !== "chats";
   $("drop-hint").hidden = tab !== "meetings";
-  $("new").title = tab === "chats" ? "Cuộc trò chuyện mới" : "Thêm cuộc họp (file hoặc link YouTube)";
+  $("new").title = t(tab === "chats" ? "new.chat" : "new.recording");
 }
 
 function showPane(kind) {
@@ -658,7 +645,7 @@ async function refreshChats() {
 function renderChatList() {
   const list = $("chat-list");
   if (!state.chats.length) {
-    list.replaceChildren(el("div", { className: "list-empty", textContent: "Chưa có cuộc trò chuyện nào" }));
+    list.replaceChildren(el("div", { className: "list-empty", textContent: t("chats.empty") }));
     return;
   }
   const nodes = [];
@@ -672,10 +659,10 @@ function renderChatList() {
     }
     const n = c.meeting_ids.length;
     const item = el("a", { className: "item", href: `/c/${c.id}` },
-      el("div", { className: "t", textContent: c.title }),
+      el("div", { className: "t", textContent: tr(c.title) }),
       el("div", { className: "sub" },
         el("span", { textContent: shortDate(day) }),
-        el("span", { className: "chip-count", textContent: n === 1 ? "1 cuộc họp" : `${n} cuộc họp` })),
+        el("span", { className: "chip-count", textContent: t("chat.count", { n }) })),
     );
     if (c.id === state.chat?.id) item.classList.add("selected");
     item.onclick = (e) => { e.preventDefault(); selectChat(c.id); };
@@ -700,7 +687,7 @@ async function selectChat(id, push = true) {
       toast(err.message);
     }
   }
-  document.title = state.chat ? state.chat.title : "Hỏi AI";
+  document.title = state.chat ? tr(state.chat.title) : t("tab.ai");
   renderChatList();
   renderChat();
   scrollChatToBottom(true);
@@ -738,8 +725,8 @@ function providerFor(chat) {
 }
 
 function formatTokens(n) {
-  if (n < 1000) return `${n} token`;
-  return `${Math.round(n / 1000).toLocaleString("vi-VN")} nghìn token`;
+  if (n < 1000) return t("tokens.n", { n });
+  return t("tokens.k", { n: Math.round(n / 1000).toLocaleString(LOCALE()) });
 }
 
 function renderChat() {
@@ -750,56 +737,57 @@ function renderChat() {
   $("composer").parentElement.hidden = !has;
   if (!has) {
     $("messages").replaceChildren(el("div", { className: "empty" },
-      el("p", { textContent: state.chats.length ? "Chọn một cuộc trò chuyện ở bên trái" : "Hỏi AI về nội dung các cuộc họp đã ghi" }),
-      Object.assign(el("button", { className: "primary-btn", textContent: "Cuộc trò chuyện mới" }), { onclick: () => openPicker(null) })));
+      el("p", { textContent: t(state.chats.length ? "chat.select" : "chat.intro") }),
+      Object.assign(el("button", { className: "primary-btn", textContent: t("new.chat") }), { onclick: () => openPicker(null) })));
     return;
   }
-  if (document.activeElement !== $("chat-title")) $("chat-title").value = chat.title;
+  if (document.activeElement !== $("chat-title")) $("chat-title").value = tr(chat.title);
 
   const select = $("chat-provider");
   const providers = state.providers.providers;
   const current = providerFor(chat);
   select.replaceChildren(...(providers.length
     ? providers.map((p) => el("option", { value: p.id, textContent: `${p.name} · ${p.model}`, selected: p.id === current?.id }))
-    : [el("option", { value: "", textContent: "Chưa cấu hình AI" })]));
+    : [el("option", { value: "", textContent: t("chat.no_provider") })]));
   select.disabled = !providers.length;
 
   const usable = chat.meetings.filter((m) => m.usable);
   const chips = chat.meetings.map((m) => {
-    const name = m.title || "Cuộc họp đã xóa";
-    const chip = el("span", { className: `chip${m.usable ? "" : " off"}`, title: m.usable ? `${name} · ${m.date}` : "Không dùng được: cuộc họp đã xóa hoặc chưa xử lý xong" },
+    const name = m.title || t("chat.deleted_recording");
+    const chip = el("span", { className: `chip${m.usable ? "" : " off"}`, title: m.usable ? `${name} · ${m.date}` : t("chat.unusable") },
       m.label ? el("span", { className: "label", textContent: m.label }) : null,
       el("span", { className: "name", textContent: name }));
-    const remove = el("button", { textContent: "×", title: "Bỏ khỏi cuộc trò chuyện", type: "button" });
+    const remove = el("button", { textContent: "×", title: t("chat.remove"), type: "button" });
     remove.onclick = () => updateScope(chat.meeting_ids.filter((x) => x !== m.id));
     chip.append(remove);
     return chip;
   });
-  const add = el("button", { className: "add", type: "button", textContent: chat.meetings.length ? "+ Thêm cuộc họp" : "+ Chọn cuộc họp" });
+  const add = el("button", { className: "add", type: "button", textContent: t(chat.meetings.length ? "chat.add" : "chat.choose") });
   add.onclick = () => openPicker(chat);
-  const tokens = el("span", { className: "tokens", textContent: usable.length ? `≈ ${formatTokens(chat.estimated_tokens)} mỗi câu hỏi` : "" });
+  const tokens = el("span", { className: "tokens", textContent: usable.length ? t("chat.tokens", { tokens: formatTokens(chat.estimated_tokens) }) : "" });
   $("chat-scope").replaceChildren(...chips, add, tokens);
 
   const notice = $("chat-notice");
   notice.classList.remove("warn");
   if (!providers.length) {
-    const open = el("button", { className: "secondary-btn", type: "button", textContent: "Mở cài đặt" });
+    const open = el("button", { className: "secondary-btn", type: "button", textContent: t("chat.open_settings") });
     open.onclick = openSettings;
-    notice.replaceChildren(el("span", { textContent: "Chưa có cấu hình AI. Thêm API key của Claude, OpenAI hoặc Gemini để bắt đầu hỏi." }), open);
+    notice.replaceChildren(el("span", { textContent: t("chat.need_provider") }), open);
     notice.hidden = false;
   } else if (!usable.length) {
-    notice.replaceChildren(el("span", { textContent: "Chưa có cuộc họp nào (đã xử lý xong) trong cuộc trò chuyện này." }));
+    notice.replaceChildren(el("span", { textContent: t("chat.need_recordings") }));
     notice.hidden = false;
   } else if (current?.provider === "openai_compat" && chat.estimated_tokens > SMALL_CONTEXT_TOKENS) {
     notice.classList.add("warn");
-    notice.replaceChildren(el("span", { textContent: `Bản ghi khoảng ${formatTokens(chat.estimated_tokens)}. Model chạy trên máy hoặc model nhỏ thường chỉ nhận 8–32 nghìn token; nếu bị lỗi hoặc trả lời thiếu, hãy bớt cuộc họp.` }));
+    notice.replaceChildren(el("span", { textContent: t("chat.small_context", { tokens: formatTokens(chat.estimated_tokens) }) }));
     notice.hidden = false;
   } else {
     notice.hidden = true;
   }
 
 
-  $("suggestions").replaceChildren(...(chat.messages.length || !usable.length || !providers.length ? [] : SUGGESTIONS.map(([label, prompt]) => {
+  $("suggestions").replaceChildren(...(chat.messages.length || !usable.length || !providers.length ? [] : SUGGESTIONS.map((key) => {
+    const [label, prompt] = [t(`suggest.${key}`), t(`suggest.${key}.q`)];
     const b = el("button", { type: "button", textContent: label, title: prompt });
     b.onclick = () => send(prompt);
     return b;
@@ -813,7 +801,7 @@ function renderMessages() {
   const box = $("messages");
   if (!chat.messages.length) {
     const n = chat.meetings.filter((m) => m.usable).length;
-    box.replaceChildren(el("div", { className: "chat-empty", textContent: n ? `Hỏi bất cứ điều gì về ${n === 1 ? "cuộc họp" : `${n} cuộc họp`} đã chọn.` : "" }));
+    box.replaceChildren(el("div", { className: "chat-empty", textContent: n ? (n === 1 ? t("chat.ask_one") : t("chat.ask_many", { n })) : "" }));
     return;
   }
   box.replaceChildren(...chat.messages.map(messageNode));
@@ -825,10 +813,10 @@ function messageNode(m) {
   const md = el("div", { className: `md${m.streaming ? " typing" : ""}` });
   md.append(renderMarkdown(m.content, m.labels || state.chat.labels));
   node.append(md);
-  if (m.error) node.append(el("div", { className: "msg-error", textContent: `⚠ ${m.error}` }));
+  if (m.error) node.append(el("div", { className: "msg-error", textContent: `⚠ ${tr(m.error)}` }));
   if (!m.streaming && m.content) {
-    const copy = el("button", { type: "button", textContent: "Copy" });
-    copy.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast("Đã copy câu trả lời"), () => toast("Không copy được"));
+    const copy = el("button", { type: "button", textContent: t("copy.short") });
+    copy.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast(t("copied.answer")), () => toast(t("copy.failed.short")));
     node.append(el("div", { className: "msg-meta" }, el("span", { textContent: [m.provider, m.model].filter(Boolean).join(" · ") }), copy));
   }
   return node;
@@ -893,7 +881,7 @@ function updateComposer() {
   const streaming = !!state.streaming;
   const ready = state.chat && state.providers.providers.length && state.chat.meetings.some((m) => m.usable);
   $("send").classList.toggle("stop", streaming);
-  $("send").setAttribute("aria-label", streaming ? "Dừng" : "Gửi");
+  $("send").setAttribute("aria-label", t(streaming ? "stop" : "send"));
   $("send").disabled = !streaming && !(ready && $("prompt").value.trim());
 }
 
@@ -951,12 +939,12 @@ async function send(text) {
   updateComposer();
   let failedEarly = false;
   try {
-    const res = await fetch(`/api/chats/${chat.id}/messages`, { method: "POST", ...jsonBody({ content: question }), signal: ctrl.signal });
+    const res = await fetch(`/api/chats/${chat.id}/messages`, { method: "POST", ...jsonBody({ content: question, lang: LANG }), signal: ctrl.signal });
     if (!res.ok) {
       let detail = res.statusText;
       try { detail = (await res.json()).detail || detail; } catch (_) { /* not JSON */ }
       failedEarly = true;
-      throw new Error(detail);
+      throw new Error(tr(typeof detail === "string" ? detail : JSON.stringify(detail)));
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -977,7 +965,7 @@ async function send(text) {
       paintStreaming(answer);
     }
   } catch (err) {
-    answer.error = err.name === "AbortError" ? "Đã dừng giữa chừng" : err.message;
+    answer.error = err.name === "AbortError" ? "@chat.stopped" : err.message;
     if (failedEarly) toast(err.message);
   } finally {
     answer.streaming = false;
@@ -1005,7 +993,7 @@ async function patchChat(changes) {
   try {
     await api(`/api/chats/${state.chat.id}`, { method: "PATCH", ...jsonBody(changes) });
   } catch (err) {
-    toast(`Không lưu được: ${err.message}`);
+    toast(t("save.failed", { message: err.message }));
     return false;
   }
   await reloadChat();
@@ -1026,7 +1014,7 @@ $("chat-title").onchange = () => {
 };
 $("chat-provider").onchange = () => patchChat({ provider_id: $("chat-provider").value });
 $("chat-delete").onclick = async () => {
-  if (!confirm(`Xóa cuộc trò chuyện "${state.chat.title}"?`)) return;
+  if (!confirm(t("confirm.delete.chat", { title: tr(state.chat.title) }))) return;
   try {
     await api(`/api/chats/${state.chat.id}`, { method: "DELETE" });
   } catch (err) {
@@ -1046,13 +1034,13 @@ function openPicker(chat) {
   pickerFor = chat;
   const chosen = new Set(chat ? chat.meeting_ids : []);
   const done = state.meetings.filter((m) => m.status === "done");
-  $("picker-title").textContent = chat ? "Cuộc họp trong cuộc trò chuyện" : "Chọn cuộc họp để hỏi";
-  $("picker-msg").textContent = done.length ? "" : "Chưa có cuộc họp nào xử lý xong.";
+  $("picker-title").textContent = t(chat ? "picker.edit" : "picker.new");
+  $("picker-msg").textContent = done.length ? "" : t("picker.none");
   $("pick-list").replaceChildren(...done.map((m) => el("label", {},
     el("input", { type: "checkbox", value: m.id, checked: chosen.has(m.id) }),
     el("span", { textContent: m.title }),
     el("span", { className: "when", textContent: `${shortDate(m.date)} · ${clock(m.duration)}` }))));
-  $("picker-ok").textContent = chat ? "Lưu" : "Bắt đầu";
+  $("picker-ok").textContent = t(chat ? "save" : "start");
   $("picker").showModal();
 }
 
@@ -1061,7 +1049,7 @@ $("picker-form").onsubmit = async (e) => {
   e.preventDefault();
   const ids = [...$("pick-list").querySelectorAll("input:checked")].map((i) => i.value);
   if (!pickerFor && !ids.length) {
-    $("picker-msg").textContent = "Chọn ít nhất một cuộc họp.";
+    $("picker-msg").textContent = t("picker.need_one");
     return;
   }
   $("picker").close();
@@ -1097,9 +1085,9 @@ function renderProviderList() {
   $("provider-list").replaceChildren(...providers.map((p) => {
     const actions = [];
     if (p.id === default_id) {
-      actions.push(el("span", { className: "badge", textContent: "Mặc định" }));
+      actions.push(el("span", { className: "badge", textContent: t("pf.default") }));
     } else {
-      const def = el("button", { className: "link", type: "button", textContent: "Đặt mặc định" });
+      const def = el("button", { className: "link", type: "button", textContent: t("pf.make_default") });
       def.onclick = async () => {
         try {
           state.providers = await api("/api/ai/default", { method: "POST", ...jsonBody({ id: p.id }) });
@@ -1110,11 +1098,11 @@ function renderProviderList() {
       };
       actions.push(def);
     }
-    const edit = el("button", { className: "link", type: "button", textContent: "Sửa" });
+    const edit = el("button", { className: "link", type: "button", textContent: t("edit") });
     edit.onclick = () => openProviderForm(p);
-    const del = el("button", { className: "link danger", type: "button", textContent: "Xóa" });
+    const del = el("button", { className: "link danger", type: "button", textContent: t("delete") });
     del.onclick = async () => {
-      if (!confirm(`Xóa cấu hình "${p.name}"?`)) return;
+      if (!confirm(t("confirm.delete.provider", { name: p.name }))) return;
       try {
         await api(`/api/ai/providers/${p.id}`, { method: "DELETE" });
       } catch (err) {
@@ -1125,7 +1113,7 @@ function renderProviderList() {
     };
     return el("div", { className: "prov" },
       el("div", { className: "info" }, el("b", { textContent: p.name }),
-        el("span", { textContent: [PROVIDER_NAMES[p.provider], p.base_url && new URL(p.base_url).host, p.model, p.key_hint].filter(Boolean).join(" · ") })),
+        el("span", { textContent: [providerName(p.provider), p.base_url && new URL(p.base_url).host, p.model, p.key_hint].filter(Boolean).join(" · ") })),
       ...actions, edit, del);
   }));
   if (!providers.length && $("provider-form").hidden) openProviderForm(null);
@@ -1133,7 +1121,7 @@ function renderProviderList() {
 
 function openProviderForm(p) {
   editing = p;
-  $("pf-heading").textContent = p ? `Sửa "${p.name}"` : "Thêm cấu hình";
+  $("pf-heading").textContent = p ? t("pf.edit.heading", { name: p.name }) : t("pf.add.heading");
   $("pf-name").value = p ? p.name : "";
   $("pf-provider").value = p ? p.provider : "anthropic";
   $("pf-provider").disabled = !!p;
@@ -1164,18 +1152,21 @@ function syncProviderFields() {
   const compat = $("pf-provider").value === "openai_compat";
   $("pf-compat").hidden = !compat;
   $("pf-key").placeholder = editing
-    ? `Để trống để giữ key hiện tại${editing.key_hint ? ` (${editing.key_hint})` : ""}`
-    : compat ? "Không bắt buộc với Ollama / LM Studio" : "Dán API key";
+    ? `${t("pf.key.keep")}${editing.key_hint ? ` (${editing.key_hint})` : ""}`
+    : t(compat ? "pf.key.optional" : "pf.key.paste");
 }
 
-$("pf-preset").replaceChildren($("pf-preset").firstElementChild,
-  ...COMPAT_PRESETS.map(([name, url], i) => el("option", { value: String(i), textContent: `${name} · ${new URL(url).host}` })));
+function renderPresets() {
+  $("pf-preset").replaceChildren(el("option", { value: "", textContent: t("pf.preset.ph") }),
+    ...COMPAT_PRESETS.map(([name, url], i) => el("option", { value: String(i), textContent: `${tr(name)} · ${new URL(url).host}` })));
+}
+renderPresets();
 $("pf-preset").onchange = () => {
   const preset = COMPAT_PRESETS[Number($("pf-preset").value)];
   if (!preset || $("pf-preset").value === "") return;
   const [name, url, model] = preset;
   $("pf-base").value = url;
-  if (!$("pf-name").value.trim()) $("pf-name").value = name;
+  if (!$("pf-name").value.trim()) $("pf-name").value = tr(name);
   if (model && !$("pf-model").value.trim()) $("pf-model").value = model;
 };
 $("pf-provider").onchange = () => {
@@ -1190,13 +1181,13 @@ $("pf-load").onclick = async () => {
   const body = editing
     ? { provider_id: editing.id, api_key: key || null, base_url: compat ? base || null : null }
     : { provider: $("pf-provider").value, api_key: key, base_url: compat ? base : null };
-  if (compat && !base) { formMessage("Nhập Base URL trước để tải danh sách model.", true); return; }
-  if (!editing && !compat && !key) { formMessage("Nhập API key trước để tải danh sách model.", true); return; }
-  formMessage("Đang tải danh sách model…");
+  if (compat && !base) { formMessage(t("pf.need_base"), true); return; }
+  if (!editing && !compat && !key) { formMessage(t("pf.need_key"), true); return; }
+  formMessage(t("pf.loading"));
   try {
     const { models } = await api("/api/ai/models", { method: "POST", ...jsonBody(body) });
     $("pf-models").replaceChildren(...models.map((m) => el("option", { value: m })));
-    formMessage(`Đã tải ${models.length} model. Bấm vào ô Model để chọn.`);
+    formMessage(t("pf.loaded", { n: models.length }));
   } catch (err) {
     formMessage(err.message, true);
   }
@@ -1219,12 +1210,36 @@ $("provider-form").onsubmit = async (e) => {
   closeProviderForm();
   await loadProviders();
   renderProviderList();
-  toast("Đã lưu cấu hình AI");
+  toast(t("pf.saved"));
 };
 $("open-settings").onclick = openSettings;
 $("pf-add").onclick = () => openProviderForm(null);
 $("settings-close").onclick = () => $("settings").close();
 $("settings").addEventListener("close", () => { if (state.chat) renderChat(); });
+
+/* ---------- language switch ---------- */
+
+document.addEventListener("langchange", () => {
+  setTab(state.tab);
+  renderList();
+  renderChatList();
+  renderPresets();
+  if (state.meeting) {
+    state.renderedKey = null; // re-render transcript labels; the audio keeps playing
+    loadMeeting(state.meeting.id);
+  } else {
+    showEmpty();
+  }
+  renderChat();
+  updatePlayer();
+  if ($("sheet").open) setSource(source);
+  if ($("settings").open) {
+    renderProviderList();
+    if (!$("provider-form").hidden) syncProviderFields();
+    $("pf-heading").textContent = editing ? t("pf.edit.heading", { name: editing.name }) : t("pf.add.heading");
+  }
+  document.title = state.tab === "chats" && state.chat ? tr(state.chat.title) : state.meeting?.title || t("app.name");
+});
 
 /* ---------- start ---------- */
 

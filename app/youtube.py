@@ -4,12 +4,14 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from app.messages import msg
+
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
 VIDEO_ID = re.compile(r"^[\w-]{6,}$")
 
 
 class YouTubeError(Exception):
-    """A YouTube link could not be used; the message is user-facing (Vietnamese)."""
+    """A YouTube link could not be used; the message is a key from app.messages."""
 
 
 def is_youtube_url(url: str) -> bool:
@@ -30,9 +32,9 @@ def is_youtube_url(url: str) -> bool:
 
 def info_summary(info: dict) -> dict:
     if info.get("_type") == "playlist":
-        raise YouTubeError("Đây là playlist. Hãy dán link của từng video.")
+        raise YouTubeError(msg("yt.playlist"))
     if info.get("is_live"):
-        raise YouTubeError("Video đang phát trực tiếp. Hãy đợi buổi phát kết thúc rồi thử lại.")
+        raise YouTubeError(msg("yt.live"))
     raw = info.get("upload_date") or ""
     date = f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}" if re.fullmatch(r"\d{8}", raw) else None
     return {"title": info.get("title") or "Video YouTube", "date": date,
@@ -43,19 +45,19 @@ def friendly_error(message: str) -> str:
     text = str(message)
     lower = text.lower()
     if "private video" in lower:
-        return "Video đang ở chế độ riêng tư nên app không tải được."
+        return msg("yt.private")
     if "confirm your age" in lower or "age-restricted" in lower:
-        return "Video bị giới hạn độ tuổi (cần đăng nhập YouTube) nên app không tải được."
+        return msg("yt.age")
     if "not a bot" in lower:
-        return "YouTube đang chặn tải tự động từ máy này. Thử lại sau ít phút."
+        return msg("yt.bot")
     if "members-only" in lower or "join this channel" in lower:
-        return "Video chỉ dành cho hội viên của kênh."
+        return msg("yt.members")
     if "unavailable" in lower or "has been removed" in lower or "does not exist" in lower:
-        return "Video không tồn tại hoặc đã bị gỡ."
+        return msg("yt.unavailable")
     if "urlopen error" in lower or "timed out" in lower or "nodename" in lower or "connection" in lower:
-        return "Không kết nối được tới YouTube."
+        return msg("yt.network")
     detail = re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*[\w-]+:\s*)?", "", text).strip()
-    return f"Không tải được video: {detail}"
+    return msg("yt.other", detail=detail)
 
 
 def _ydl(extra: dict):
@@ -91,5 +93,5 @@ def download_audio(url: str, folder: Path, on_progress: Callable[[float], None])
         raise YouTubeError(friendly_error(exc.msg if hasattr(exc, "msg") else str(exc))) from exc
     files = [p for p in folder.glob("upload.*") if not p.name.endswith((".part", ".ytdl"))]
     if not files:
-        raise YouTubeError("Tải xong nhưng không thấy file âm thanh.")
+        raise YouTubeError(msg("yt.no_file"))
     return files[0]
