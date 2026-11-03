@@ -131,3 +131,13 @@ def test_pick_richer_prefers_more_clean_text():
     real = [timed(0, 3, "ngoài cái em mình còn những cái thằng khác nữa")]
     assert pick_richer(halluc, real) is real
     assert pick_richer(real, halluc) is real
+
+
+@pytest.mark.parametrize("text", ["Thanks for watching!", "Thank you for watching.",
+                                  "Please like and subscribe", "Subscribe to my channel for more videos"])
+def test_clean_drops_english_outros(text):
+    assert clean_segments([s(text)]) == []
+
+
+def test_clean_keeps_english_technical_subscribe():
+    assert len(clean_segments([s("Each consumer will subscribe to the topic and read new events")])) == 1

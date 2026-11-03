@@ -8,7 +8,8 @@ DATA_DIR = ROOT / "data"  # AI settings (with API keys) and saved chats
 PORT = 8765
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
-LANGUAGE = "vi"
+LANGUAGE = "vi"  # default spoken language
+LANGUAGES = ("vi", "en", "auto")  # "auto": Whisper detects it once, on the first speech
 
 VAD_MODEL = MODELS_DIR / "silero_vad.onnx"
 

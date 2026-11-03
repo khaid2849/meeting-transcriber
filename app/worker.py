@@ -22,7 +22,8 @@ class Engine(Protocol):
     def probe(self, path: Path) -> dict: ...
     def extract_audio(self, src: Path, dst: Path) -> None: ...
     def load_samples(self, path: Path) -> np.ndarray: ...
-    def transcribe(self, samples, model: str, keywords: str, on_progress) -> list[dict]: ...
+    def transcribe(self, samples, model: str, keywords: str, on_progress,
+                   language: str) -> tuple[list[dict], str | None]: ...
     def release(self) -> None: ...
     def download(self, url: str, folder: Path, on_progress) -> Path: ...
 
@@ -40,9 +41,9 @@ class RealEngine:
         from app.audio import load_samples
         return load_samples(path)
 
-    def transcribe(self, samples, model, keywords, on_progress):
+    def transcribe(self, samples, model, keywords, on_progress, language):
         from app.asr import transcribe
-        return transcribe(samples, model, keywords, on_progress)
+        return transcribe(samples, model, keywords, on_progress, language)
 
     def release(self):
         from app.asr import release_model
@@ -155,9 +156,12 @@ class Worker:
         meeting = self.store.get(meeting_id)
         on_progress = self._stage(meeting_id, "transcribing")
         samples = self.engine.load_samples(audio)
-        segments = self.engine.transcribe(samples, self.model, meeting.keywords, on_progress)
-        self.store.write_json(meeting_id, "whisper.json", {"model": self.model, "segments": segments})
-        self.store.update(meeting_id, model=self.model)
+        segments, used = self.engine.transcribe(samples, self.model, meeting.keywords, on_progress,
+                                                meeting.language)
+        self.store.write_json(meeting_id, "whisper.json",
+                              {"model": self.model, "language": used, "segments": segments})
+        self.store.update(meeting_id, model=self.model,
+                          detected_language=used if meeting.language == "auto" else None)
         self._finish(meeting_id, segments)
 
     def _finish(self, meeting_id: str, segments: list[dict]) -> None:

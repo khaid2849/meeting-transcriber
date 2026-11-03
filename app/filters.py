@@ -6,7 +6,9 @@ from collections.abc import Callable
 OnDrop = Callable[[dict, str], None]
 
 OUTRO_PATTERNS = ("subscribe cho kênh", "nhấn subscribe", "ghiền mì gõ", "đăng ký kênh",
-                  "like và share", "cảm ơn các bạn đã theo dõi", "hẹn gặp lại các bạn trong")
+                  "like và share", "cảm ơn các bạn đã theo dõi", "hẹn gặp lại các bạn trong",
+                  "thanks for watching", "thank you for watching", "like and subscribe",
+                  "subscribe to my channel", "subscribe to the channel")
 OUTRO_MAX_WORDS = 25
 REPEAT_RUN = 3  # identical consecutive segments at or above this count collapse to one
 LOOP_MIN = 4  # an n-gram repeated this many times in a row collapses to one

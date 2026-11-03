@@ -202,3 +202,20 @@ def test_youtube_link_reports_unavailable_video(client, monkeypatch):
     monkeypatch.setattr(youtube, "fetch_info", private)
     r = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123"})
     assert r.status_code == 400 and "riêng tư" in r.json()["detail"]
+
+
+def test_upload_spoken_language(client):
+    assert upload(client).json()["language"] == "vi"
+    assert upload(client, language="en").json()["language"] == "en"
+    assert upload(client, language="auto").json()["language"] == "auto"
+    r = upload(client, language="klingon")
+    assert r.status_code == 422 and r.json()["detail"] == "@err.language"
+
+
+def test_youtube_spoken_language(client, monkeypatch):
+    from app import youtube
+    monkeypatch.setattr(youtube, "fetch_info", lambda url: dict(INFO))
+    m = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123", "language": "auto"}).json()
+    assert m["language"] == "auto"
+    bad = client.post("/api/meetings/youtube", json={"url": "https://youtu.be/abc123", "language": "xx"})
+    assert bad.status_code == 422

@@ -30,11 +30,18 @@ class YouTubeIn(BaseModel):
     title: str = ""
     date: str = ""
     keywords: str = ""
+    language: str = config.LANGUAGE
 
 
 class MeetingPatch(BaseModel):
     title: str | None = None
     date: str | None = None
+
+
+def _check_language(value: str) -> str:
+    if value not in config.LANGUAGES:
+        raise HTTPException(422, msg("err.language"))
+    return value
 
 
 def _check_date(value: str) -> str:
@@ -99,12 +106,15 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
 
     @app.post("/api/meetings", status_code=201)
     async def create_meeting(file: UploadFile = File(...), title: str = Form(""),
-                             date: str = Form(...), keywords: str = Form("")) -> dict:
+                             date: str = Form(...), keywords: str = Form(""),
+                             language: str = Form(config.LANGUAGE)) -> dict:
         date = _check_date(date)
+        language = _check_language(language)
         name = file.filename or "audio"
         title = title.strip() or Path(name).stem
         suffix = re.sub(r"[^a-z0-9.]", "", Path(name).suffix.lower()) or ".bin"
-        meeting = store.create(title=title, date=date, keywords=keywords.strip(), original_name=name)
+        meeting = store.create(title=title, date=date, keywords=keywords.strip(), original_name=name,
+                               language=language)
         try:
             with open(store.dir(meeting.id) / f"upload{suffix}", "wb") as out:
                 while chunk := await file.read(1 << 20):
@@ -117,6 +127,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
 
     @app.post("/api/meetings/youtube", status_code=201)
     def create_from_youtube(body: YouTubeIn) -> dict:
+        language = _check_language(body.language)
         if not youtube.is_youtube_url(body.url):
             raise HTTPException(422, msg("err.youtube_link"))
         try:
@@ -126,7 +137,7 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
         date = _check_date(body.date) if body.date.strip() else (info["date"] or Date.today().isoformat())
         meeting = store.create(title=body.title.strip() or info["title"], date=date, keywords=body.keywords.strip(),
                                original_name="YouTube", source_url=info["url"] or body.url.strip(),
-                               duration=info["duration"])
+                               duration=info["duration"], language=language)
         worker.enqueue(meeting.id)
         return store.get(meeting.id).to_dict()
 

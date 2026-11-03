@@ -31,6 +31,8 @@ class Meeting:
     original_name: str = ""
     created_at: str = ""
     source_url: str | None = None  # YouTube link the audio was downloaded from
+    language: str = "vi"  # spoken language chosen when adding: vi | en | auto
+    detected_language: str | None = None  # what Whisper found when language is "auto"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -71,7 +73,7 @@ class MeetingStore:
         return self.root / meeting_id
 
     def create(self, *, title: str, date: str, keywords: str, original_name: str,
-               source_url: str | None = None, duration: float | None = None) -> Meeting:
+               source_url: str | None = None, duration: float | None = None, language: str = "vi") -> Meeting:
         base = slugify(title, date)
         meeting_id, n = base, 1
         while (self.root / meeting_id).exists():
@@ -79,7 +81,7 @@ class MeetingStore:
             meeting_id = f"{base}-{n}"
         (self.root / meeting_id).mkdir()
         meeting = Meeting(id=meeting_id, title=title, date=date, keywords=keywords,
-                          original_name=original_name, source_url=source_url, duration=duration,
+                          original_name=original_name, source_url=source_url, duration=duration, language=language,
                           created_at=datetime.now().isoformat(timespec="microseconds"))
         self.save(meeting)
         return meeting

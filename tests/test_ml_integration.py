@@ -25,7 +25,8 @@ def samples():
 def test_transcribe_excerpt(samples):
     from app.asr import transcribe
     progress = []
-    segs = transcribe(samples, config.WHISPER_MODEL, "Odoo, AI", progress.append)
+    segs, language = transcribe(samples, config.WHISPER_MODEL, "Odoo, AI", progress.append, "vi")
+    assert language == "vi"
     assert len(segs) >= 3
     assert all(0 <= s["start"] <= s["end"] <= 60.5 for s in segs)
     assert all(s["text"].strip() for s in segs)
@@ -36,7 +37,7 @@ def test_transcribe_excerpt(samples):
 def test_release_model_frees_gpu_memory(samples):
     import mlx.core as mx
     from app.asr import release_model, transcribe
-    transcribe(samples[:16000 * 10], config.WHISPER_MODEL, "", lambda p: None)
+    transcribe(samples[:16000 * 10], config.WHISPER_MODEL, "", lambda p: None, "vi")
     assert mx.get_active_memory() > 1e9
     release_model()
     assert mx.get_active_memory() < 3e8
@@ -52,3 +53,9 @@ def test_youtube_download_real_video(tmp_path):
     progress = []
     path = download_audio(url, tmp_path, progress.append)
     assert path.name.startswith("upload.") and probe(path)["duration"] == pytest.approx(19, abs=1.5)
+
+
+def test_auto_language_detects_vietnamese(samples):
+    from app.asr import transcribe
+    segs, language = transcribe(samples[:16000 * 30], config.WHISPER_MODEL, "", lambda p: None, "auto")
+    assert language == "vi" and segs

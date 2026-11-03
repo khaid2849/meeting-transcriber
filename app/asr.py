@@ -4,7 +4,7 @@ from collections.abc import Callable
 import numpy as np
 import sherpa_onnx
 
-from app.config import CHUNK_MAX_GAP, CHUNK_MAX_LEN, LANGUAGE, VAD_MODEL
+from app.config import CHUNK_MAX_GAP, CHUNK_MAX_LEN, VAD_MODEL
 from app.filters import needs_retry, pick_richer, speech_chunks
 
 SR = 16000
@@ -35,21 +35,29 @@ def detect_speech(samples: np.ndarray) -> list[tuple[float, float]]:
     return regions
 
 
-def transcribe(samples: np.ndarray, model: str, keywords: str,
-               on_progress: Callable[[float], None]) -> list[dict]:
-    """Return raw Whisper segments in absolute seconds (cleaning happens later, see worker)."""
+def transcribe(samples: np.ndarray, model: str, keywords: str, on_progress: Callable[[float], None],
+               language: str = "vi") -> tuple[list[dict], str | None]:
+    """Return (raw Whisper segments in absolute seconds, language used). Cleaning happens later.
+
+    language "auto" detects the language on the first speech chunk and keeps it for the rest:
+    per-chunk detection on short chunks flips between languages.
+    """
     import mlx_whisper
 
     regions = detect_speech(samples)
     chunks = speech_chunks(regions, CHUNK_MAX_LEN, total=len(samples) / SR, max_gap=CHUNK_MAX_GAP)
     prompt = keywords.strip() or None
+    lang = None if language == "auto" else language
 
     def run(piece: np.ndarray, initial_prompt: str | None) -> list[dict]:
-        return mlx_whisper.transcribe(
-            piece, path_or_hf_repo=model, language=LANGUAGE, initial_prompt=initial_prompt,
+        nonlocal lang
+        result = mlx_whisper.transcribe(
+            piece, path_or_hf_repo=model, language=lang, initial_prompt=initial_prompt,
             condition_on_previous_text=False,
             # Word timings are unused and cost ~3x per call on short chunks.
-            word_timestamps=False, verbose=None)["segments"]
+            word_timestamps=False, verbose=None)
+        lang = lang or result.get("language")
+        return result["segments"]
 
     segments: list[dict] = []
     for i, (start, end) in enumerate(chunks):
@@ -72,7 +80,7 @@ def transcribe(samples: np.ndarray, model: str, keywords: str,
         on_progress((i + 1) / len(chunks))
     if not chunks:
         on_progress(1.0)
-    return segments
+    return segments, lang
 
 
 def release_model() -> None:

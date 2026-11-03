@@ -214,6 +214,20 @@ async function loadMeeting(id) {
   renderMeeting(data.meeting, data.paragraphs);
 }
 
+function languageName(code) {
+  try {
+    const name = new Intl.DisplayNames([LOCALE()], { type: "language" }).of(code);
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch (_) {
+    return code;
+  }
+}
+
+function spokenLabel(m) {
+  if (m.language !== "auto") return languageName(m.language || "vi");
+  return m.detected_language ? t("meta.detected", { lang: languageName(m.detected_language) }) : t("lang.auto");
+}
+
 function renderMeeting(m, paragraphs) {
   state.meeting = m;
   $("empty").hidden = true;
@@ -223,8 +237,8 @@ function renderMeeting(m, paragraphs) {
   if (document.activeElement !== $("title")) $("title").value = m.title;
   $("date").value = m.date;
   $("date-btn").textContent = longDate(m.date);
-  $("meta").textContent = [longDuration(m.duration), m.model && m.model.split("/").pop().replace(/-mlx$/, "")]
-    .filter(Boolean).join(" · ");
+  $("meta").textContent = [longDuration(m.duration), spokenLabel(m),
+    m.model && m.model.split("/").pop().replace(/-mlx$/, "")].filter(Boolean).join(" · ");
   $("source-link").hidden = !m.source_url;
   if (m.source_url) $("source-link").href = m.source_url;
 
@@ -423,6 +437,9 @@ function setSource(kind) {
   (yt ? $("f-url") : $("f-title")).focus();
 }
 
+$("f-language").onchange = () => {
+  try { localStorage.setItem("spokenLang", $("f-language").value); } catch (_) { /* per-device preference */ }
+};
 $("src-file").onclick = () => setSource("file");
 $("src-yt").onclick = () => setSource("youtube");
 $("f-url").addEventListener("input", updateSubmit);
@@ -441,6 +458,8 @@ function openSheet(file = null, url = null) {
   pendingFile = null;
   $("upload-form").reset();
   $("f-date").value = todayIso();
+  try { $("f-language").value = localStorage.getItem("spokenLang") || "vi"; } catch (_) { /* default stays */ }
+  if (!$("f-language").value) $("f-language").value = "vi";
   $("file-name").textContent = t("file.pick");
   $("file-pick").classList.remove("has-file", "over");
   $("submit").disabled = true;
@@ -462,7 +481,8 @@ async function submitYoutube() {
   try {
     const m = await api("/api/meetings/youtube", {
       method: "POST",
-      ...jsonBody({ url: $("f-url").value.trim(), title: $("f-title").value, date: $("f-date").value, keywords: $("f-keywords").value }),
+      ...jsonBody({ url: $("f-url").value.trim(), title: $("f-title").value, date: $("f-date").value,
+        keywords: $("f-keywords").value, language: $("f-language").value }),
     });
     ytBusy = false;
     $("sheet").close();
@@ -495,6 +515,7 @@ $("upload-form").onsubmit = (e) => {
   form.append("title", $("f-title").value);
   form.append("date", $("f-date").value);
   form.append("keywords", $("f-keywords").value);
+  form.append("language", $("f-language").value);
 
   const bar = $("upload-progress");
   const msg = $("upload-msg");

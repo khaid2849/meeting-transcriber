@@ -32,11 +32,12 @@ class FakeEngine:
         self.calls.append("load")
         return np.zeros(16000, dtype=np.float32)
 
-    def transcribe(self, samples, model, keywords, on_progress):
+    def transcribe(self, samples, model, keywords, on_progress, language):
         self.calls.append("transcribe")
+        self.language = language
         on_progress(0.5)
         on_progress(1.0)
-        return [dict(s) for s in self.segments]
+        return [dict(s) for s in self.segments], ("en" if language == "auto" else language)
 
     def release(self):
         self.calls.append("release")
@@ -297,3 +298,23 @@ def test_recover_marks_interrupted_download(store):
     store.update(m.id, status="downloading")
     Worker(store, YouTubeEngine(), "m").recover()
     assert store.get(m.id).status == "error"
+
+
+def test_spoken_language_is_passed_to_whisper(store):
+    m = store.create(title="Talk", date="2026-11-03", keywords="", original_name="a.wav", language="en")
+    (store.dir(m.id) / "upload.wav").write_bytes(b"raw")
+    engine = FakeEngine()
+    Worker(store, engine, "m").run_job(m.id)
+    assert engine.language == "en" and store.get(m.id).detected_language is None
+
+
+def test_auto_language_records_what_was_detected(store):
+    m = store.create(title="Talk", date="2026-11-03", keywords="", original_name="a.wav", language="auto")
+    (store.dir(m.id) / "upload.wav").write_bytes(b"raw")
+    Worker(store, FakeEngine(), "m").run_job(m.id)
+    got = store.get(m.id)
+    assert (got.language, got.detected_language) == ("auto", "en")
+
+
+def test_language_defaults_to_vietnamese(store):
+    assert new_meeting(store).language == "vi"
