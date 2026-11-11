@@ -1,6 +1,6 @@
 # Transcriber
 
-Web app chạy trên máy (macOS Apple Silicon) để chuyển file âm thanh, video hoặc link YouTube thành **văn bản tiếng Việt** có mốc thời gian, rồi hỏi AI về nội dung. Việc chuyển văn bản chạy hoàn toàn trên máy; chỉ khi bạn dùng "Hỏi AI" thì văn bản mới được gửi tới nhà cung cấp AI bạn cấu hình. Giao diện có tiếng Việt và tiếng Anh (nút VI / EN ở góc dưới thanh bên).
+Web app chạy trên máy (macOS Apple Silicon) để chuyển file âm thanh, video, link YouTube hoặc buổi họp ghi âm trực tiếp thành **văn bản tiếng Việt** có mốc thời gian, rồi hỏi AI về nội dung. Việc chuyển văn bản chạy hoàn toàn trên máy; chỉ khi bạn dùng "Hỏi AI" thì văn bản mới được gửi tới nhà cung cấp AI bạn cấu hình. Giao diện có tiếng Việt và tiếng Anh (nút VI / EN ở góc dưới thanh bên).
 
 - Nhận dạng giọng nói: Whisper (`mlx-whisper`, chạy trên GPU Apple), ngôn ngữ cố định tiếng Việt.
 - Bỏ qua đoạn im lặng bằng VAD (silero, qua `sherpa-onnx`) và lọc các câu "ảo" Whisper hay sinh ra (câu lặp, "hãy subscribe…").
@@ -26,6 +26,11 @@ Khuyên cài thêm `brew install deno`: `yt-dlp` cần một bộ chạy JavaScr
 ```
 
 1. Kéo thả file ghi âm hoặc video (wav, mp3, m4a, mp4, mov… bất kỳ định dạng `ffmpeg` đọc được), hoặc dán link video YouTube (⌘V ở bất kỳ đâu trong cửa sổ, hay chọn tab "Link YouTube" khi bấm +). Video YouTube phải công khai hoặc không công khai (unlisted); app chỉ tải phần âm thanh bằng `yt-dlp`.
+   Hoặc **ghi âm trực tiếp buổi họp**: bấm nút micro cạnh dấu + (hay tab "Ghi âm"), rồi "Bắt đầu ghi".
+   - Họp trực tiếp trong phòng: chỉ cần micro của máy.
+   - Họp online (Meet, Zoom, Teams…): bật "Ghi cả âm thanh máy tính", chọn tab hoặc màn hình có cuộc họp và bật "Chia sẻ âm thanh" trong hộp thoại của trình duyệt (cần Chrome hoặc Edge). Giọng của bạn (micro) và của người khác (âm thanh máy) được trộn vào một bản ghi.
+   - Có thể tạm dừng / ghi tiếp. Bấm "Dừng ghi" rồi "Chuyển thành văn bản". Âm thanh nằm trong tab trình duyệt cho tới lúc đó: đừng đóng hay tải lại tab khi đang ghi (app sẽ hỏi lại trước khi đóng), và có thể "Lưu file ghi âm về máy" để giữ một bản.
+   - Trình duyệt chỉ cho ghi âm khi mở app qua `http://localhost` hoặc HTTPS.
 2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng).
 3. Đợi xử lý (đóng tab cũng được). Mất khoảng 1/4 thời lượng bản ghi (đo trên M5: bản ghi 34 phút xử lý trong ~9,5 phút).
 4. Mở bản ghi: bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải văn bản, hoặc bấm "Hỏi AI".

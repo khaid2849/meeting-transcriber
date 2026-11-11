@@ -218,6 +218,26 @@ svg { display: block; }
 .sheet-msg.error { color: var(--danger); }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .sheet-tabs { margin: 0; flex: none; }
+.rec {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius);
+  border: .5px solid var(--line); background: var(--bg);
+}
+.rec-top { display: flex; align-items: center; gap: 8px; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); flex: none; }
+.rec.recording .rec-dot { background: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
+.rec.paused .rec-dot { background: var(--danger); opacity: .4; }
+.rec-time { font: 600 22px/1 var(--display); font-variant-numeric: tabular-nums; }
+.rec-state { margin-left: auto; font-size: 12px; color: var(--muted); text-align: right; }
+.rec-level div { transition: width .15s; }
+.rec.recording .rec-level div { background: var(--danger); }
+.rec small { font-size: 12px; color: var(--faint); }
+.check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.rec-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rec-stop { background: var(--danger); }
+.rec-save { color: var(--accent); font-size: 12px; text-decoration: none; }
+.rec-save:hover { text-decoration: underline; }
+@keyframes rec-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .rec.recording .rec-dot { animation: none; } }
 .source-link { margin-left: 8px; color: var(--accent); font-size: 12px; text-decoration: none; }
 .source-link:hover { text-decoration: underline; }
 

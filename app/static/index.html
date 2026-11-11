@@ -23,6 +23,9 @@
         <button role="tab" id="tab-meetings" class="on" data-i18n="tab.recordings"></button>
         <button role="tab" id="tab-chats" data-i18n="tab.ai"></button>
       </div>
+      <button class="icon-btn" id="record-new" data-i18n-title="rec.new" data-i18n-aria="rec.new">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="1.8" width="4" height="7.5" rx="2"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.2M5.8 14.2h4.4"/></svg>
+      </button>
       <button class="icon-btn" id="new" data-i18n-aria="new.aria">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
       </button>
@@ -152,6 +155,7 @@
     <div class="segmented sheet-tabs" role="tablist">
       <button type="button" role="tab" id="src-file" class="on" data-i18n="src.file"></button>
       <button type="button" role="tab" id="src-yt" data-i18n="src.yt"></button>
+      <button type="button" role="tab" id="src-rec" data-i18n="src.rec"></button>
     </div>
     <label class="field" id="yt-field" hidden><span data-i18n="yt.label"></span>
       <input type="url" id="f-url" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocomplete="off">
@@ -162,6 +166,26 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
       <span id="file-name"></span>
     </label>
+    <div class="rec" id="rec-panel" hidden>
+      <div class="rec-top">
+        <span class="rec-dot" aria-hidden="true"></span>
+        <span class="rec-time" id="rec-time" role="timer">0:00</span>
+        <span class="rec-state" id="rec-state"></span>
+      </div>
+      <div class="progress rec-level" aria-hidden="true"><div id="rec-level"></div></div>
+      <label class="check" id="rec-sys-wrap">
+        <input type="checkbox" id="rec-sys">
+        <span data-i18n="rec.system"></span>
+      </label>
+      <small id="rec-sys-help" data-i18n="rec.system.help"></small>
+      <div class="rec-actions">
+        <button type="button" class="primary-btn" id="rec-start" data-i18n="rec.start"></button>
+        <button type="button" class="secondary-btn" id="rec-pause" hidden></button>
+        <button type="button" class="primary-btn rec-stop" id="rec-stop" data-i18n="rec.stop" hidden></button>
+        <button type="button" class="secondary-btn" id="rec-redo" data-i18n="rec.redo" hidden></button>
+        <a class="rec-save" id="rec-save" data-i18n="rec.save" hidden></a>
+      </div>
+    </div>
     <label class="field"><span data-i18n="f.title"></span><input type="text" id="f-title"></label>
     <label class="field"><span data-i18n="f.date"></span><input type="date" id="f-date">
       <small id="date-hint" data-i18n="date.hint" hidden></small>

@@ -145,7 +145,9 @@ class Worker:
             self._stage(meeting_id, "converting")
             info = self.engine.probe(upload)
             self.engine.extract_audio(upload, audio)
-            self.store.update(meeting_id, duration=info["duration"])
+            # A browser recording (WebM) has no duration in its header; the converted file does.
+            duration = info["duration"] or self.engine.probe(audio)["duration"]
+            self.store.update(meeting_id, duration=duration)
             if info["has_video"] or downloaded:  # the link stays in meeting.json; audio.m4a is enough
                 upload.unlink()
             else:

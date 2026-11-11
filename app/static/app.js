@@ -413,23 +413,29 @@ window.onpopstate = () => route(false);
 
 let pendingFile = null;
 let xhr = null;
-let source = "file"; // "file" | "youtube"
+let source = "file"; // "file" | "youtube" | "record"
 let ytBusy = false;
 
 function updateSubmit() {
-  $("submit").disabled = ytBusy || !!xhr || (source === "file" ? !pendingFile : !YT_RE.test($("f-url").value.trim()));
+  $("submit").disabled = ytBusy || !!xhr || recBusy()
+    || (source === "youtube" ? !YT_RE.test($("f-url").value.trim()) : !pendingFile);
 }
 
 function setSource(kind) {
+  if (recBusy() && kind !== "record") return; // finish or discard the recording first
   source = kind;
   const yt = kind === "youtube";
-  $("src-file").classList.toggle("on", !yt);
+  const record = kind === "record";
+  $("src-file").classList.toggle("on", kind === "file");
   $("src-yt").classList.toggle("on", yt);
-  $("file-pick").hidden = yt;
+  $("src-rec").classList.toggle("on", record);
+  $("file-pick").hidden = kind !== "file";
+  $("rec-panel").hidden = !record;
   $("yt-field").hidden = !yt;
   $("date-hint").hidden = !yt;
-  $("f-title").placeholder = t(yt ? "f.title.ph.yt" : "f.title.ph.file");
-  $("submit").textContent = t(yt ? "yt.submit" : "upload");
+  $("f-title").placeholder = t(yt ? "f.title.ph.yt" : record ? "rec.title.ph" : "f.title.ph.file");
+  $("submit").textContent = t(yt ? "yt.submit" : record ? "rec.submit" : "upload");
+  renderRec();
   // A YouTube video defaults to its upload date; a file to today.
   if (yt && $("f-date").value === todayIso()) $("f-date").value = "";
   if (!yt && !$("f-date").value) $("f-date").value = todayIso();
@@ -442,10 +448,11 @@ $("f-language").onchange = () => {
 };
 $("src-file").onclick = () => setSource("file");
 $("src-yt").onclick = () => setSource("youtube");
+$("src-rec").onclick = () => setSource("record");
 $("f-url").addEventListener("input", updateSubmit);
 
 function setFile(file) {
-  if (!file) return;
+  if (!file || recBusy()) return;
   pendingFile = file;
   $("file-name").textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
   $("file-pick").classList.add("has-file");
@@ -453,8 +460,9 @@ function setFile(file) {
   updateSubmit();
 }
 
-function openSheet(file = null, url = null) {
-  if (xhr || ytBusy) return;
+function openSheet(file = null, url = null, kind = null) {
+  if (xhr || ytBusy || recBusy()) return;
+  resetRec();
   pendingFile = null;
   $("upload-form").reset();
   $("f-date").value = todayIso();
@@ -467,10 +475,224 @@ function openSheet(file = null, url = null) {
   $("upload-msg").className = "sheet-msg";
   $("upload-progress").hidden = true;
   if (!$("sheet").open) $("sheet").showModal();
-  setSource(url ? "youtube" : "file");
+  setSource(url ? "youtube" : kind || "file");
   if (url) { $("f-url").value = url; updateSubmit(); }
   setFile(file);
 }
+
+/* ---------- live recording (microphone, optionally mixed with computer audio) ---------- */
+
+const REC_TYPES = [["audio/webm;codecs=opus", "webm"], ["audio/mp4", "m4a"], ["audio/webm", "webm"], ["audio/ogg;codecs=opus", "ogg"]];
+const rec = {
+  recorder: null, // MediaRecorder while recording or paused
+  starting: false, // waiting for the permission prompts
+  streams: [], ctx: null, analyser: null, chunks: [],
+  startedAt: 0, elapsed: 0, // ms recorded before the current run; pauses excluded
+  tick: null, wake: null,
+  url: null, size: 0, // object URL and size of the finished recording
+};
+const recSupported = () => !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+const recBusy = () => !!rec.recorder || rec.starting;
+const recElapsed = () => rec.elapsed + (rec.recorder?.state === "recording" ? Date.now() - rec.startedAt : 0);
+const recState = () => (rec.starting ? "starting" : rec.recorder ? (rec.recorder.state === "paused" ? "paused" : "recording")
+  : rec.url ? "done" : "idle");
+
+function recMessage(text, error = false) {
+  $("upload-msg").className = `sheet-msg${error ? " error" : ""}`;
+  $("upload-msg").textContent = text;
+}
+
+function renderRec() {
+  const s = recState();
+  const live = s === "recording" || s === "paused";
+  $("rec-panel").className = `rec ${s}`;
+  $("rec-time").textContent = clock(recElapsed() / 1000);
+  $("rec-state").textContent = t(`rec.state.${s}`, { size: (rec.size / 1048576).toFixed(1) });
+  if (!live) $("rec-level").style.width = "0";
+  $("rec-start").hidden = live || s === "done";
+  $("rec-start").disabled = s === "starting" || !recSupported();
+  $("rec-pause").hidden = $("rec-stop").hidden = !live;
+  $("rec-pause").textContent = t(s === "paused" ? "rec.resume" : "rec.pause");
+  $("rec-redo").hidden = $("rec-save").hidden = s !== "done";
+  const canShare = !!navigator.mediaDevices?.getDisplayMedia;
+  $("rec-sys-wrap").hidden = !canShare;
+  $("rec-sys").disabled = s !== "idle";
+  $("src-file").disabled = $("src-yt").disabled = recBusy();
+  if (source === "record" && s === "idle" && !recSupported()) recMessage(t("rec.unsupported"), true);
+  updateSubmit();
+}
+
+function recTick() {
+  $("rec-time").textContent = clock(recElapsed() / 1000);
+  if (!rec.analyser || rec.recorder?.state !== "recording") { $("rec-level").style.width = "0"; return; }
+  const buf = new Float32Array(rec.analyser.fftSize);
+  rec.analyser.getFloatTimeDomainData(buf);
+  let peak = 0;
+  for (const v of buf) peak = Math.max(peak, Math.abs(v));
+  $("rec-level").style.width = `${Math.min(100, Math.sqrt(peak) * 100)}%`;
+}
+
+async function keepAwake() {
+  // Keeps the screen (and so the computer) awake while this tab is visible.
+  try { rec.wake = await navigator.wakeLock?.request("screen"); } catch (_) { /* best effort */ }
+}
+
+function releaseCapture() {
+  clearInterval(rec.tick);
+  rec.tick = null;
+  for (const stream of rec.streams) for (const track of stream.getTracks()) track.stop();
+  rec.streams = [];
+  rec.ctx?.close().catch(() => {});
+  rec.ctx = rec.analyser = null;
+  rec.wake?.release().catch(() => {});
+  rec.wake = null;
+}
+
+// Back to "nothing recorded": stops a running recording and throws its audio away.
+function resetRec() {
+  if (rec.recorder) {
+    rec.recorder.onstop = rec.recorder.onerror = null;
+    try { rec.recorder.stop(); } catch (_) { /* already stopped */ }
+    rec.recorder = null;
+  }
+  releaseCapture();
+  if (rec.url) URL.revokeObjectURL(rec.url);
+  Object.assign(rec, { starting: false, chunks: [], elapsed: 0, url: null, size: 0 });
+}
+
+function recError(err) {
+  if (err?.name === "NotAllowedError" || err?.name === "SecurityError") return t("rec.denied");
+  if (err?.name === "NotFoundError") return t("rec.no_mic");
+  return t("rec.failed", { message: err?.message || String(err) });
+}
+
+async function startRecording() {
+  if (recBusy() || !recSupported()) return;
+  resetRec();
+  pendingFile = null;
+  rec.starting = true;
+  recMessage("");
+  renderRec();
+  const streams = [];
+  const wanted = () => rec.starting && $("sheet").open && source === "record";
+  try {
+    let note = "";
+    if ($("rec-sys").checked) {
+      // Must come first: the share picker needs the click that started this.
+      const shared = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      streams.push(shared);
+      if (!shared.getAudioTracks().length) throw new Error(t("rec.no_system_audio"));
+    }
+    try {
+      streams.push(await navigator.mediaDevices.getUserMedia({ audio: true }));
+    } catch (err) {
+      if (!streams.length) throw err;
+      note = t("rec.mic_missing");
+    }
+    if (!wanted()) throw new Error("cancelled");
+
+    // Only the audio is recorded; the shared video track just keeps the share alive.
+    const inputs = streams.map((s) => new MediaStream(s.getAudioTracks()));
+    const ctx = new AudioContext();
+    ctx.resume().catch(() => {}); // not awaited: it never settles without a user gesture
+    const analyser = ctx.createAnalyser();
+    const mix = inputs.length > 1 ? ctx.createMediaStreamDestination() : null;
+    for (const input of inputs) {
+      const node = ctx.createMediaStreamSource(input);
+      node.connect(analyser);
+      if (mix) node.connect(mix);
+    }
+    const type = REC_TYPES.find(([mime]) => MediaRecorder.isTypeSupported(mime));
+    const recorder = new MediaRecorder(mix ? mix.stream : inputs[0],
+      { ...(type ? { mimeType: type[0] } : {}), audioBitsPerSecond: 64000 });
+    const ext = type ? type[1] : "webm";
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onerror = (e) => { recMessage(recError(e.error), true); stopRecording(); };
+    recorder.onstop = () => {
+      rec.elapsed = recElapsed();
+      rec.recorder = null;
+      releaseCapture();
+      const now = new Date();
+      const stamp = `${todayIso()} ${String(now.getHours()).padStart(2, "0")}.${String(now.getMinutes()).padStart(2, "0")}`;
+      const file = new File(chunks, `${t("rec.filename", { stamp })}.${ext}`, { type: recorder.mimeType.split(";")[0] });
+      if (!file.size) {
+        resetRec();
+        recMessage(t("rec.empty"), true);
+        renderRec();
+        return;
+      }
+      rec.url = URL.createObjectURL(file);
+      rec.size = file.size;
+      $("rec-save").href = rec.url;
+      $("rec-save").download = file.name;
+      setFile(file);
+      renderRec();
+    };
+    const live = streams.flatMap((s) => s.getAudioTracks());
+    for (const track of live) {
+      track.onended = () => {
+        if (rec.recorder !== recorder) return;
+        if (live.some((other) => other.readyState === "live")) { recMessage(t("rec.source_ended")); return; }
+        recMessage(t("rec.all_ended"));
+        stopRecording();
+      };
+    }
+
+    Object.assign(rec, { recorder, streams, ctx, analyser, chunks, starting: false, elapsed: 0, startedAt: Date.now() });
+    recorder.start(5000); // hand over data every 5 s instead of one big piece at the end
+    rec.tick = setInterval(recTick, 200);
+    keepAwake();
+    recMessage(note);
+  } catch (err) {
+    for (const stream of streams) for (const track of stream.getTracks()) track.stop();
+    const cancelled = !rec.starting || err.message === "cancelled";
+    rec.starting = false;
+    if (!cancelled) recMessage(err.name === "Error" ? err.message : recError(err), true);
+  }
+  renderRec();
+}
+
+function stopRecording() {
+  if (rec.recorder && rec.recorder.state !== "inactive") rec.recorder.stop();
+}
+
+function togglePause() {
+  if (!rec.recorder) return;
+  if (rec.recorder.state === "recording") {
+    rec.elapsed = recElapsed();
+    rec.recorder.pause();
+  } else if (rec.recorder.state === "paused") {
+    rec.recorder.resume();
+    rec.startedAt = Date.now();
+  }
+  renderRec();
+}
+
+// Closing the sheet with audio that was never uploaded needs a yes from the user.
+function mayCloseSheet() {
+  if (xhr || ytBusy) return false;
+  return !(rec.recorder || rec.url) || confirm(t("rec.confirm.discard"));
+}
+
+$("rec-start").onclick = startRecording;
+$("rec-stop").onclick = stopRecording;
+$("rec-pause").onclick = togglePause;
+$("rec-redo").onclick = () => {
+  if (!confirm(t("rec.confirm.discard"))) return;
+  resetRec();
+  pendingFile = null;
+  recMessage("");
+  renderRec();
+};
+$("record-new").onclick = () => openSheet(null, null, "record");
+$("sheet").addEventListener("close", () => { resetRec(); renderRec(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && rec.recorder) keepAwake();
+});
+window.addEventListener("beforeunload", (e) => {
+  if (rec.recorder || rec.url) e.preventDefault();
+});
 
 async function submitYoutube() {
   const msg = $("upload-msg");
@@ -502,9 +724,9 @@ $("empty-new").onclick = () => openSheet();
 $("file").onchange = () => setFile($("file").files[0]);
 $("cancel").onclick = () => {
   if (xhr) { xhr.abort(); return; }
-  $("sheet").close();
+  if (mayCloseSheet()) $("sheet").close();
 };
-$("sheet").addEventListener("cancel", (e) => { if (xhr || ytBusy) e.preventDefault(); });
+$("sheet").addEventListener("cancel", (e) => { if (!mayCloseSheet()) e.preventDefault(); });
 
 $("upload-form").onsubmit = (e) => {
   e.preventDefault();
@@ -624,6 +846,7 @@ function setTab(tab) {
   $("list").hidden = tab !== "meetings";
   $("chat-list").hidden = tab !== "chats";
   $("drop-hint").hidden = tab !== "meetings";
+  $("record-new").hidden = tab !== "meetings";
   $("new").title = t(tab === "chats" ? "new.chat" : "new.recording");
 }
 
