@@ -318,3 +318,15 @@ def test_auto_language_records_what_was_detected(store):
 
 def test_language_defaults_to_vietnamese(store):
     assert new_meeting(store).language == "vi"
+
+
+def test_recording_without_header_duration_uses_converted_audio(store):
+    class NoDurationEngine(FakeEngine):
+        def probe(self, path):
+            self.calls.append("probe")
+            return {"duration": 0.0 if path.name.startswith("upload") else 75.0, "has_video": False}
+
+    m = new_meeting(store, ext="webm")
+    Worker(store, NoDurationEngine(), "model-x").run_job(m.id)
+    assert store.get(m.id).duration == 75.0
+    assert "original.webm" in files(store, m)

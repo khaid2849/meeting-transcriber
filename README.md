@@ -1,6 +1,6 @@
 # Transcriber
 
-Web app chạy trên máy (macOS Apple Silicon) để chuyển file âm thanh, video hoặc link YouTube thành **văn bản tiếng Việt** có mốc thời gian, rồi hỏi AI về nội dung. Việc chuyển văn bản chạy hoàn toàn trên máy; chỉ khi bạn dùng "Hỏi AI" thì văn bản mới được gửi tới nhà cung cấp AI bạn cấu hình. Giao diện có tiếng Việt và tiếng Anh (nút VI / EN ở góc dưới thanh bên).
+Web app chạy trên máy (macOS Apple Silicon) để chuyển file âm thanh, video, link YouTube hoặc buổi họp ghi âm trực tiếp thành **văn bản tiếng Việt** có mốc thời gian, rồi hỏi AI về nội dung. Việc chuyển văn bản chạy hoàn toàn trên máy; chỉ khi bạn dùng "Hỏi AI" thì văn bản mới được gửi tới nhà cung cấp AI bạn cấu hình. Giao diện có tiếng Việt và tiếng Anh (nút VI / EN ở góc dưới thanh bên).
 
 - Nhận dạng giọng nói: Whisper (`mlx-whisper`, chạy trên GPU Apple), ngôn ngữ cố định tiếng Việt.
 - Bỏ qua đoạn im lặng bằng VAD (silero, qua `sherpa-onnx`) và lọc các câu "ảo" Whisper hay sinh ra (câu lặp, "hãy subscribe…").
@@ -26,6 +26,11 @@ Khuyên cài thêm `brew install deno`: `yt-dlp` cần một bộ chạy JavaScr
 ```
 
 1. Kéo thả file ghi âm hoặc video (wav, mp3, m4a, mp4, mov… bất kỳ định dạng `ffmpeg` đọc được), hoặc dán link video YouTube (⌘V ở bất kỳ đâu trong cửa sổ, hay chọn tab "Link YouTube" khi bấm +). Video YouTube phải công khai hoặc không công khai (unlisted); app chỉ tải phần âm thanh bằng `yt-dlp`.
+   Hoặc **ghi âm trực tiếp buổi họp**: bấm nút micro cạnh dấu + (hay tab "Ghi âm"), rồi "Bắt đầu ghi".
+   - Họp trực tiếp trong phòng: chỉ cần micro của máy.
+   - Họp online (Meet, Zoom, Teams…): bật "Ghi cả âm thanh máy tính", chọn tab hoặc màn hình có cuộc họp và bật "Chia sẻ âm thanh" trong hộp thoại của trình duyệt (cần Chrome hoặc Edge). Giọng của bạn (micro) và của người khác (âm thanh máy) được trộn vào một bản ghi.
+   - Có thể tạm dừng / ghi tiếp. Bấm "Dừng ghi" rồi "Chuyển thành văn bản". Âm thanh nằm trong tab trình duyệt cho tới lúc đó: đừng đóng hay tải lại tab khi đang ghi (app sẽ hỏi lại trước khi đóng), và có thể "Lưu file ghi âm về máy" để giữ một bản.
+   - Trình duyệt chỉ cho ghi âm khi mở app qua `http://localhost` hoặc HTTPS.
 2. Điền tiêu đề, ngày, **từ khóa** (tên riêng, thuật ngữ: giúp Whisper nghe đúng).
 3. Đợi xử lý (đóng tab cũng được). Mất khoảng 1/4 thời lượng bản ghi (đo trên M5: bản ghi 34 phút xử lý trong ~9,5 phút).
 4. Mở bản ghi: bấm mốc thời gian để nghe lại đoạn đó, copy hoặc tải văn bản, hoặc bấm "Hỏi AI".
@@ -37,10 +42,37 @@ meetings/<ngày>-<tiêu-đề>/
   transcript.md    văn bản để đọc / đưa cho AI
   audio.m4a        audio đã nén để phát lại
   original.<ext>   file audio gốc (file video thì không giữ)
-  meeting.json     tiêu đề, ngày, trạng thái
+  meeting.json     tiêu đề, ngày, trạng thái (và file nào đã chuyển sang MinIO)
   whisper.json     kết quả Whisper thô
   segments.json    các câu đã lọc
 ```
+
+## Lưu âm thanh trên MinIO (tùy chọn)
+
+Để đỡ tốn dung lượng máy này, app có thể chuyển file âm thanh của các bản ghi đã xử lý xong sang một máy chủ MinIO (hoặc dịch vụ tương thích S3 khác). Văn bản (`transcript.md`, `segments.json`…) luôn nằm lại trên máy này.
+
+1. Trên MinIO: tạo một bucket và một cặp access key / secret key có quyền đọc, ghi, xóa trong bucket đó.
+2. Tạo file cấu hình (thư mục `data/` không nằm trong git):
+
+   ```bash
+   mkdir -p data && cp remote_storage.example.json data/remote_storage.json
+   chmod 600 data/remote_storage.json   # rồi sửa endpoint, bucket, access_key, secret_key
+   ```
+
+3. Kiểm tra kết nối (ghi, đọc, xóa một file thử; không đụng tới bản ghi nào):
+
+   ```bash
+   uv run python -m app.remote check
+   ```
+
+4. Khởi động lại app. Từ đó, mỗi bản ghi xử lý xong sẽ tự chuyển `audio.m4a` và `original.*` lên bucket (tại `<prefix>/<thư mục bản ghi>/`) rồi xóa bản trên máy này. File chỉ bị xóa sau khi đã lên đủ; nếu MinIO không kết nối được, âm thanh ở lại trên máy.
+5. Chuyển các bản ghi đã có sẵn (và những bản lần trước chuyển lỗi):
+
+   ```bash
+   uv run python -m app.remote push
+   ```
+
+Lưu ý: nghe lại trong app cần máy MinIO đang bật và kết nối được (app lấy âm thanh từ MinIO rồi chuyển cho trình duyệt). Xóa bản ghi trong app sẽ xóa luôn âm thanh trên MinIO. Bỏ file cấu hình đi thì app quay lại lưu trên máy, nhưng âm thanh đã chuyển vẫn nằm trên MinIO.
 
 **Đừng sửa tay `transcript.md`**: file này được sinh lại mỗi khi đổi tiêu đề hoặc ngày.
 
