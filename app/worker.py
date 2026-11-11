@@ -11,6 +11,7 @@ import numpy as np
 from app.assemble import render_markdown, to_utterances
 from app.filters import clean_segments
 from app.messages import msg
+from app.remote import offload, restore
 from app.storage import Meeting, MeetingStore, write_text_atomic
 
 log = logging.getLogger(__name__)
@@ -71,8 +72,9 @@ def update_meeting(store: MeetingStore, meeting_id: str, **changes) -> Meeting:
 
 
 class Worker:
-    def __init__(self, store: MeetingStore, engine: Engine, model: str):
+    def __init__(self, store: MeetingStore, engine: Engine, model: str, remote=None):
         self.store, self.engine, self.model = store, engine, model
+        self.remote = remote  # app.remote.RemoteStorage, or None to keep audio on this disk
         self.queue: queue.Queue[str] = queue.Queue()
         self.progress_interval = 2.0
 
@@ -118,6 +120,12 @@ class Worker:
                 self.store.update(meeting_id, status="error", error=str(exc) or type(exc).__name__)
             except KeyError:
                 pass
+            return
+        if self.remote is not None:
+            try:
+                offload(self.store, self.remote, meeting_id)
+            except Exception:  # noqa: BLE001 — the transcript is done; `python -m app.remote push` retries
+                log.exception("could not move the audio of %s to remote storage; it stays on this disk", meeting_id)
 
     def _stage(self, meeting_id: str, status: str):
         self.store.update(meeting_id, status=status, progress=0.0)
@@ -135,6 +143,9 @@ class Worker:
         audio = folder / "audio.m4a"
         upload = next(folder.glob("upload.*"), None)
         downloaded = False
+        if (upload is None and not audio.exists() and self.remote is not None
+                and audio.name in self.store.get(meeting_id).remote_files):
+            restore(self.store, self.remote, meeting_id, audio.name)
         if upload is None and not audio.exists():
             source_url = self.store.get(meeting_id).source_url
             if source_url:

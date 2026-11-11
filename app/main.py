@@ -7,13 +7,13 @@ from datetime import date as Date
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
-from app import config, youtube
+from app import config, remote as remote_storage, youtube
 from app.ai.chats import ChatStore
 from app.ai.routes import ai_router
 from app.ai.settings import AISettings
@@ -23,6 +23,7 @@ from app.storage import Meeting, MeetingStore
 from app.worker import ACTIVE, RealEngine, Worker, update_meeting
 
 STATIC = Path(__file__).parent / "static"
+log = logging.getLogger(__name__)
 
 
 class YouTubeIn(BaseModel):
@@ -62,7 +63,7 @@ def allowed_hosts(env=os.environ) -> tuple[str, ...]:
 
 
 def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_HOSTS,
-               ai_settings: AISettings | None = None, chats: ChatStore | None = None) -> FastAPI:
+               ai_settings: AISettings | None = None, chats: ChatStore | None = None, remote=None) -> FastAPI:
     app = FastAPI(title="Meeting Transcriber", lifespan=lifespan)
     # Blocks DNS-rebinding pages from reading transcripts through the browser.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
@@ -173,17 +174,42 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
 
     @app.delete("/api/meetings/{meeting_id}", status_code=204)
     def delete(meeting_id: str) -> Response:
-        if get_or_404(meeting_id).status in ACTIVE:
+        meeting = get_or_404(meeting_id)
+        if meeting.status in ACTIVE:
             raise HTTPException(409, msg("err.busy_delete"))
+        if meeting.remote_files and remote is not None:
+            try:  # remote first: a failure leaves the recording intact instead of orphaning its audio
+                remote.delete(meeting_id)
+            except Exception:  # noqa: BLE001
+                log.exception("could not delete the remote audio of %s", meeting_id)
+                raise HTTPException(502, msg("err.remote_delete")) from None
         store.delete(meeting_id)
         return Response(status_code=204)
 
     @app.get("/api/meetings/{meeting_id}/audio")
-    def audio(meeting_id: str):
-        path = store.dir(get_or_404(meeting_id).id) / "audio.m4a"
-        if not path.exists():
+    def audio(meeting_id: str, request: Request):
+        meeting = get_or_404(meeting_id)
+        path = store.dir(meeting.id) / "audio.m4a"
+        if path.exists():
+            return FileResponse(path, media_type="audio/mp4")
+        size = meeting.remote_files.get(path.name)
+        if not size or remote is None:
             raise HTTPException(404, msg("err.no_audio"))
-        return FileResponse(path, media_type="audio/mp4")
+        # The audio lives on the remote storage: relay it, honouring Range so the player can seek.
+        try:
+            span = remote_storage.parse_range(request.headers.get("range"), size)
+        except ValueError:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+        start, end = span or (0, size - 1)
+        try:
+            body = remote.open(meeting.id, path.name, offset=start, length=end - start + 1)
+        except Exception:  # noqa: BLE001
+            log.exception("could not read the remote audio of %s", meeting_id)
+            raise HTTPException(502, msg("err.remote_audio")) from None
+        headers = {"Accept-Ranges": "bytes", "Content-Length": str(end - start + 1)}
+        if span:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        return StreamingResponse(body, status_code=206 if span else 200, headers=headers, media_type="audio/mp4")
 
     @app.get("/api/meetings/{meeting_id}/transcript.md")
     def transcript(meeting_id: str):
@@ -199,7 +225,12 @@ def create_app(store: MeetingStore, worker, lifespan=None, allowed_hosts=LOCAL_H
 def build_app() -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     store = MeetingStore(config.MEETINGS_DIR)
-    worker = Worker(store, RealEngine(), config.WHISPER_MODEL)
+    try:
+        remote = remote_storage.load()
+    except Exception:  # noqa: BLE001 — a broken config must not stop the app; audio just stays local
+        log.exception("remote storage is misconfigured (%s); audio stays on this disk", remote_storage.CONFIG_FILE)
+        remote = None
+    worker = Worker(store, RealEngine(), config.WHISPER_MODEL, remote=remote)
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -207,5 +238,5 @@ def build_app() -> FastAPI:
         yield
 
     return create_app(store, worker, lifespan=lifespan, allowed_hosts=allowed_hosts(),
-                      ai_settings=AISettings(config.DATA_DIR / "ai_settings.json"),
+                      remote=remote, ai_settings=AISettings(config.DATA_DIR / "ai_settings.json"),
                       chats=ChatStore(config.DATA_DIR / "chats"))

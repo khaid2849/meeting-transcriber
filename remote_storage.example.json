@@ -1,0 +1,7 @@
+{
+  "endpoint": "http://192.168.1.50:9000",
+  "bucket": "meeting-transcriber",
+  "access_key": "ACCESS_KEY_CUA_BAN",
+  "secret_key": "SECRET_KEY_CUA_BAN",
+  "prefix": ""
+}

@@ -42,10 +42,37 @@ meetings/<ngày>-<tiêu-đề>/
   transcript.md    văn bản để đọc / đưa cho AI
   audio.m4a        audio đã nén để phát lại
   original.<ext>   file audio gốc (file video thì không giữ)
-  meeting.json     tiêu đề, ngày, trạng thái
+  meeting.json     tiêu đề, ngày, trạng thái (và file nào đã chuyển sang MinIO)
   whisper.json     kết quả Whisper thô
   segments.json    các câu đã lọc
 ```
+
+## Lưu âm thanh trên MinIO (tùy chọn)
+
+Để đỡ tốn dung lượng máy này, app có thể chuyển file âm thanh của các bản ghi đã xử lý xong sang một máy chủ MinIO (hoặc dịch vụ tương thích S3 khác). Văn bản (`transcript.md`, `segments.json`…) luôn nằm lại trên máy này.
+
+1. Trên MinIO: tạo một bucket và một cặp access key / secret key có quyền đọc, ghi, xóa trong bucket đó.
+2. Tạo file cấu hình (thư mục `data/` không nằm trong git):
+
+   ```bash
+   mkdir -p data && cp remote_storage.example.json data/remote_storage.json
+   chmod 600 data/remote_storage.json   # rồi sửa endpoint, bucket, access_key, secret_key
+   ```
+
+3. Kiểm tra kết nối (ghi, đọc, xóa một file thử; không đụng tới bản ghi nào):
+
+   ```bash
+   uv run python -m app.remote check
+   ```
+
+4. Khởi động lại app. Từ đó, mỗi bản ghi xử lý xong sẽ tự chuyển `audio.m4a` và `original.*` lên bucket (tại `<prefix>/<thư mục bản ghi>/`) rồi xóa bản trên máy này. File chỉ bị xóa sau khi đã lên đủ; nếu MinIO không kết nối được, âm thanh ở lại trên máy.
+5. Chuyển các bản ghi đã có sẵn (và những bản lần trước chuyển lỗi):
+
+   ```bash
+   uv run python -m app.remote push
+   ```
+
+Lưu ý: nghe lại trong app cần máy MinIO đang bật và kết nối được (app lấy âm thanh từ MinIO rồi chuyển cho trình duyệt). Xóa bản ghi trong app sẽ xóa luôn âm thanh trên MinIO. Bỏ file cấu hình đi thì app quay lại lưu trên máy, nhưng âm thanh đã chuyển vẫn nằm trên MinIO.
 
 **Đừng sửa tay `transcript.md`**: file này được sinh lại mỗi khi đổi tiêu đề hoặc ngày.
 

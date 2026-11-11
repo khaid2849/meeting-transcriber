@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import threading
 import unicodedata
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ class Meeting:
     source_url: str | None = None  # YouTube link the audio was downloaded from
     language: str = "vi"  # spoken language chosen when adding: vi | en | auto
     detected_language: str | None = None  # what Whisper found when language is "auto"
+    remote_files: dict[str, int] = field(default_factory=dict)  # audio moved to remote storage: name -> bytes
 
     def to_dict(self) -> dict:
         return asdict(self)

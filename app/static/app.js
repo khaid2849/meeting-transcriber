@@ -409,6 +409,15 @@ $("back").onclick = () => select(null);
 $("ask").onclick = () => newChat([state.selected]);
 window.onpopstate = () => route(false);
 
+// Playback failed: ask the server why (e.g. the storage machine holding the audio is off) and say so.
+audio.addEventListener("error", async () => {
+  if (!state.meeting || !audio.getAttribute("src")) return;
+  try {
+    const res = await fetch(`/api/meetings/${state.meeting.id}/audio`, { headers: { Range: "bytes=0-0" } });
+    if (!res.ok) toast(tr((await res.json()).detail));
+  } catch (_) { /* nothing more to say than the player's own failure */ }
+});
+
 /* ---------- upload ---------- */
 
 let pendingFile = null;
